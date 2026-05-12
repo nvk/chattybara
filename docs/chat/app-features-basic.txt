@@ -1,0 +1,6 @@
+# Clean-room app-layer feature model for no-hardware UI tests.
+BEACON monitoring 14.105 USB
+CQ testing chattybara local app features
+MAIL JA1QSO Test subject | This is a synthetic mailbox body.
+FILE-OFFER JA1QSO sample.txt 42 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 synthetic file metadata only
+STATUS

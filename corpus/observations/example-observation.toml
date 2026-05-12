@@ -1,0 +1,18 @@
+schema_version = 1
+observation_id = "black-box-synthetic-001"
+generated_payload = "hello"
+expected_behavior = "external modem host interface responds to synthetic control script"
+provenance = "clean-inferred"
+notes = ["example metadata only; no external modem output is checked in"]
+
+[endpoint]
+modem = "external-modem"
+modem_version = "unknown"
+os = "macos"
+audio_path = "virtual-loopback"
+host_path = "tcp-localhost"
+
+[[files]]
+path = "example-host-transcript.txt"
+role = "host-transcript"
+media_type = "text/plain"

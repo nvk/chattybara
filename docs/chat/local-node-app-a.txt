@@ -1,0 +1,5 @@
+# Station A side for clean-room app feature packets.
+BEACON monitoring 14.105 USB
+EXPECT-CQ replying over app packets
+MAIL Test subject | Synthetic mailbox body
+EXPECT-FILE-OFFER sample.txt 42 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 metadata only

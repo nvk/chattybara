@@ -1,0 +1,42 @@
+[package]
+name = "chattybara-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "chattybara"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+chattybara-chat = { path = "../chattybara-chat", version = "0.1.0-alpha.1" }
+chattybara-station = { path = "../chattybara-station", version = "0.1.0-alpha.1" }
+orca-audio = { git = "https://gitlab.com/yokij/orca.git", rev = "a58d3451982c6e7ce3fd382ae2ccee370a54c81a", version = "0.1.0-alpha.1" }
+orca-corpus = { git = "https://gitlab.com/yokij/orca.git", rev = "a58d3451982c6e7ce3fd382ae2ccee370a54c81a", version = "0.1.0-alpha.1" }
+orca-dsp = { git = "https://gitlab.com/yokij/orca.git", rev = "a58d3451982c6e7ce3fd382ae2ccee370a54c81a", version = "0.1.0-alpha.1" }
+orca-frames = { git = "https://gitlab.com/yokij/orca.git", rev = "a58d3451982c6e7ce3fd382ae2ccee370a54c81a", version = "0.1.0-alpha.1" }
+orca-host = { git = "https://gitlab.com/yokij/orca.git", rev = "a58d3451982c6e7ce3fd382ae2ccee370a54c81a", version = "0.1.0-alpha.1" }
+clap.workspace = true
+cpal.workspace = true
+crossterm.workspace = true
+ratatui.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serialport.workspace = true
+sha2.workspace = true
+toml.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

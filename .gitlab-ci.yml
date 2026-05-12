@@ -1,0 +1,57 @@
+image: rust:1.95-bookworm
+
+stages:
+  - check
+  - lab
+
+variables:
+  CARGO_TERM_COLOR: always
+  CARGO_HOME: "$CI_PROJECT_DIR/.cargo-home"
+
+cache:
+  key:
+    files:
+      - Cargo.lock
+  paths:
+    - .cargo-home/registry
+    - .cargo-home/git
+    - target
+
+before_script:
+  - apt-get update
+  - apt-get install -y --no-install-recommends pkg-config libasound2-dev libudev-dev
+  - rustup component add rustfmt clippy
+  - rustc --version
+  - cargo --version
+
+fmt:
+  stage: check
+  script:
+    - cargo fmt --all -- --check
+
+clippy:
+  stage: check
+  script:
+    - cargo clippy --workspace --all-targets -- -D warnings
+
+test:
+  stage: check
+  script:
+    - cargo test --workspace
+
+no_hardware_lab:
+  stage: lab
+  needs:
+    - test
+  script:
+    - cargo run -p chattybara-cli -- corpus audit
+    - cargo run -p chattybara-cli -- corpus verify corpus/fixtures-small/manifest.example.toml
+    - cargo run -p chattybara-cli -- fixture suite out/regression-suite
+    - cargo run -p chattybara-cli -- corpus verify out/regression-suite
+    - cargo run -p chattybara-cli -- lab run out/lab
+    - cargo run -p chattybara-cli -- lab snapshot out/lab/lab-report.json --out out/lab/lab-snapshot.json
+    - cargo run -p chattybara-cli -- lab compare out/lab/lab-snapshot.json out/lab/lab-report.json
+    - cargo run -p chattybara-cli -- modem roundtrip "hello chattybara"
+    - cargo run -p chattybara-cli -- modem encode "hello chattybara" out/packet.wav
+    - cargo run -p chattybara-cli -- modem decode out/packet.wav
+    - cargo run -p chattybara-cli -- modem sweep "hello chattybara" out/modem-sweep

@@ -1,0 +1,32 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Linux audio/serial dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends pkg-config libasound2-dev libudev-dev
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+      - run: cargo run -p chattybara-cli -- corpus audit
+      - run: cargo run -p chattybara-cli -- corpus verify corpus/fixtures-small/manifest.example.toml
+      - run: cargo run -p chattybara-cli -- fixture suite out/regression-suite
+      - run: cargo run -p chattybara-cli -- corpus verify out/regression-suite
+      - run: cargo run -p chattybara-cli -- lab run out/lab
+      - run: cargo run -p chattybara-cli -- lab snapshot out/lab/lab-report.json --out out/lab/lab-snapshot.json
+      - run: cargo run -p chattybara-cli -- lab compare out/lab/lab-snapshot.json out/lab/lab-report.json
+      - run: cargo run -p chattybara-cli -- modem roundtrip "hello chattybara"
+      - run: cargo run -p chattybara-cli -- modem encode "hello chattybara" out/packet.wav
+      - run: cargo run -p chattybara-cli -- modem decode out/packet.wav
+      - run: cargo run -p chattybara-cli -- modem sweep "hello chattybara" out/modem-sweep

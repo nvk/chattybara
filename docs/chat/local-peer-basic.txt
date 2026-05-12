@@ -1,0 +1,6 @@
+# Two-station localhost packet-audio chat script.
+# A and B are independent station states joined by a local TCP audio-frame link.
+A CONNECT
+A SEND hello over local peer
+B SEND roger local peer
+A DISCONNECT

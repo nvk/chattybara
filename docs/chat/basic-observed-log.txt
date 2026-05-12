@@ -1,0 +1,3 @@
+# Manually normalized public chat log for no-hardware comparison tests.
+OUT JA1QSO hello from chattybara
+IN JA1QSO roger from peer

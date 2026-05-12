@@ -1,0 +1,6 @@
+# Synthetic chattybara chat QSO for no-hardware tests.
+CONNECT JA1QSO
+SEND hello from chattybara
+RX JA1QSO roger from peer
+STATUS
+DISCONNECT

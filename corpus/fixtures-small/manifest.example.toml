@@ -1,0 +1,11 @@
+schema_version = 1
+
+[[fixtures]]
+id = "synthetic-silence-001"
+audio = "synthetic-silence-001.wav"
+sample_rate = 8000
+channels = 1
+payload = "synthetic silence"
+provenance = "clean-public"
+expected = "no-signal"
+sha256 = "c726d333dd159a31423f3480dbb1c5c4a9dfcd30efe1f7e12ade390dc92e8908"

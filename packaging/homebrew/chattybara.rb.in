@@ -1,0 +1,23 @@
+class Chattybara < Formula
+  desc "Terminal radio chat client with the clean-room orca modem stack"
+  homepage "https://github.com/nvk/chattybara"
+  version "@VERSION@"
+  license "MIT"
+
+  if OS.mac? && Hardware::CPU.arm?
+    url "@URL@"
+    sha256 "@SHA256@"
+  else
+    raise "prebuilt chattybara Homebrew formula currently supports Apple Silicon macOS only"
+  end
+
+  def install
+    bin.install "chattybara"
+  end
+
+  test do
+    system "#{bin}/chattybara", "--help"
+    output = shell_output("#{bin}/chattybara modem roundtrip \"hello chattybara\"")
+    assert_match '"ok": true', output
+  end
+end

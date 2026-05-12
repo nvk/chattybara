@@ -1,0 +1,6 @@
+# Single-station script for a two-process localhost packet-audio run.
+# Run this side with --connect using station A's ready-file address.
+EXPECT-CONNECT
+EXPECT-MSG hello from node a
+SEND roger from node b
+EXPECT-DISCONNECT

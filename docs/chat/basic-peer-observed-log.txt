@@ -1,0 +1,3 @@
+# Manually normalized public chat log from the peer station.
+IN JA1TST hello from chattybara
+OUT JA1TST roger from peer
