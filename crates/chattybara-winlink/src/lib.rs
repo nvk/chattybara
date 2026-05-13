@@ -16,11 +16,11 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 use thiserror::Error;
 
-pub const DEFAULT_CMS_HOST: &str = "server.winlink.org";
+pub const DEFAULT_CMS_HOST: &str = "cms.winlink.org";
 pub const DEFAULT_CMS_PORT: u16 = 8772;
 pub const DEFAULT_TELNET_TIMEOUT_MS: u64 = 3000;
 pub const WINLINK_PASSWORD_ENV: &str = "CHATTYBARA_WINLINK_PASSWORD";
-const CMS_TELNET_PASSWORD: &str = "CMSTelnet";
+const CMS_TELNET_PASSWORD: &str = "CMSTELNET";
 const TELNET_PROMPT_MAX_BYTES: usize = 4096;
 const B2F_LINE_MAX_BYTES: usize = 8192;
 const WINLINK_SECURE_SALT: [u8; 64] = [
@@ -756,15 +756,16 @@ impl TelnetCmsSession {
     ) -> WinlinkResult<String> {
         let mut buffer = Vec::new();
         let mut byte = [0_u8; 1];
+        let mut matched = false;
         while buffer.len() < max_bytes {
             match self.stream.read(&mut byte) {
                 Ok(0) => break,
                 Ok(_) => {
                     buffer.push(byte[0]);
-                    if patterns
+                    matched |= patterns
                         .iter()
-                        .any(|pattern| contains_ascii_case_insensitive(&buffer, pattern))
-                    {
+                        .any(|pattern| contains_ascii_case_insensitive(&buffer, pattern));
+                    if matched && matches!(byte[0], b':' | b'\r' | b'\n') {
                         return Ok(String::from_utf8_lossy(&buffer).trim().to_owned());
                     }
                 }

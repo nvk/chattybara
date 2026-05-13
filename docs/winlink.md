@@ -86,6 +86,8 @@ Dry-run check:
 chattybara winlink telnet --check
 ```
 
+The default CMS endpoint is `cms.winlink.org:8772`.
+
 Live TCP check only:
 
 ```sh

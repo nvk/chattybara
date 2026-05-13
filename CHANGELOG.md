@@ -2,6 +2,13 @@
 
 All notable public release changes are tracked here.
 
+## 0.1.0-alpha.5 - 2026-05-13
+
+- Changed the default Winlink CMS endpoint to `cms.winlink.org`.
+- Send the Telnet access code as `CMSTELNET`.
+- Consume the full `Callsign :` and `Password :` prompts before sending login
+  lines, avoiding leftover prompt bytes in the B2F handshake reader.
+
 ## 0.1.0-alpha.4 - 2026-05-13
 
 - Added receive-only live Telnet/CMS inbox metadata sync for Winlink.

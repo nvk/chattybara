@@ -13,7 +13,7 @@ modem lab material.
 
 ## Status
 
-Current release: `0.1.0-alpha.4`.
+Current release: `0.1.0-alpha.5`.
 
 This is a public alpha for no-hardware chat-client development. It is useful
 for TUI workflow testing, local peer/node sessions, mailbox and file-offer

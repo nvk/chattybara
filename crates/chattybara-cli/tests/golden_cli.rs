@@ -507,7 +507,7 @@ fn winlink_telnet_live_sync_lists_fake_cms_inbox() {
         stream.write_all(b"Callsign :").expect("write callsign");
         assert_eq!(read_nonempty_cr_line(&mut reader), "JA1TST");
         stream.write_all(b"Password :").expect("write password");
-        assert_eq!(read_nonempty_cr_line(&mut reader), "CMSTelnet");
+        assert_eq!(read_nonempty_cr_line(&mut reader), "CMSTELNET");
         stream
             .write_all(b"[WL2K-5.0-B2FHM$]\r;PQ: 23753528\rCMS>\r")
             .expect("write handshake");
