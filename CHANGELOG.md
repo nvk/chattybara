@@ -2,7 +2,7 @@
 
 All notable public release changes are tracked here.
 
-## Unreleased
+## 0.1.0-alpha.8 - 2026-05-13
 
 - Added macOS Keychain-backed Winlink password storage via
   `chattybara winlink account password set`, with stdin and secure prompt
