@@ -172,7 +172,7 @@ checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
 
 [[package]]
 name = "chattybara-chat"
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 dependencies = [
  "serde",
  "thiserror 2.0.18",
@@ -180,7 +180,7 @@ dependencies = [
 
 [[package]]
 name = "chattybara-cli"
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 dependencies = [
  "anyhow",
  "chattybara-chat",
@@ -207,7 +207,7 @@ dependencies = [
 
 [[package]]
 name = "chattybara-station"
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 dependencies = [
  "serde",
  "serde_json",
@@ -216,8 +216,9 @@ dependencies = [
 
 [[package]]
 name = "chattybara-winlink"
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 dependencies = [
+ "md-5",
  "serde",
  "serde_json",
  "sha2",
@@ -801,6 +802,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d1525a2a28c7f4fa0fc98bb91ae755d1e2d1505079e05539e35bc876b5d65ae9"
 dependencies = [
  "regex-automata",
+]
+
+[[package]]
+name = "md-5"
+version = "0.10.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d89e7ee0cfbedfc4da3340218492196241d89eefb6dab27de5df917a6d2e78cf"
+dependencies = [
+ "cfg-if",
+ "digest",
 ]
 
 [[package]]

@@ -2,6 +2,17 @@
 
 All notable public release changes are tracked here.
 
+## 0.1.0-alpha.4 - 2026-05-13
+
+- Added receive-only live Telnet/CMS inbox metadata sync for Winlink.
+- Added local station settings via `chattybara station config --station CALL`
+  so personal call signs stay outside committed examples and source.
+- Added secure Winlink challenge response support using an environment-sourced
+  password, without command-line password flags.
+- Added fake CMS regression tests for Telnet login, B2F handshake, proposal
+  checksum handling, metadata storage, and safe payload deferral.
+- Documented the live inbox check workflow and its current metadata-only limit.
+
 ## 0.1.0-alpha.3 - 2026-05-13
 
 - Added an early transport-neutral Winlink mailbox crate and CLI workflow.

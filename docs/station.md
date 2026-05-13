@@ -14,6 +14,12 @@ not open radios, audio devices, or external apps. It provides:
 
 ## Commands
 
+Save the local operator station outside the repository:
+
+```sh
+chattybara station config --station CALL
+```
+
 List the mode registry:
 
 ```sh

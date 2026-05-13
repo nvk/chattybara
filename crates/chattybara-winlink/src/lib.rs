@@ -5,8 +5,9 @@
 //! and orca reports are guarded scaffolds that share the same store and safety
 //! model while the full session protocols are built out.
 
+use md5::{Digest, Md5};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
+use sha2::Sha256;
 use std::fmt::Write as _;
 use std::fs;
 use std::io::{Read, Write};
@@ -18,6 +19,16 @@ use thiserror::Error;
 pub const DEFAULT_CMS_HOST: &str = "server.winlink.org";
 pub const DEFAULT_CMS_PORT: u16 = 8772;
 pub const DEFAULT_TELNET_TIMEOUT_MS: u64 = 3000;
+pub const WINLINK_PASSWORD_ENV: &str = "CHATTYBARA_WINLINK_PASSWORD";
+const CMS_TELNET_PASSWORD: &str = "CMSTelnet";
+const TELNET_PROMPT_MAX_BYTES: usize = 4096;
+const B2F_LINE_MAX_BYTES: usize = 8192;
+const WINLINK_SECURE_SALT: [u8; 64] = [
+    77, 197, 101, 206, 190, 249, 93, 200, 51, 243, 93, 237, 71, 94, 239, 138, 68, 108, 70, 185,
+    225, 137, 217, 16, 51, 122, 193, 48, 194, 195, 198, 175, 172, 169, 70, 84, 61, 62, 104, 186,
+    114, 52, 61, 168, 66, 129, 192, 208, 187, 249, 232, 193, 41, 113, 41, 45, 240, 16, 29, 228,
+    208, 228, 61, 20,
+];
 pub const DEFAULT_VARA_HOST: &str = "127.0.0.1";
 pub const DEFAULT_VARA_COMMAND_PORT: u16 = 8300;
 pub const DEFAULT_VARA_DATA_PORT: u16 = 8301;
@@ -44,6 +55,10 @@ pub enum WinlinkError {
     SendNotAllowed { transport: String },
     #[error("invalid B2F proposal: {0}")]
     InvalidB2fProposal(String),
+    #[error("live Winlink Telnet/CMS inbox check requires {0} in the environment")]
+    MissingPasswordEnv(&'static str),
+    #[error("Winlink Telnet/CMS protocol error: {0}")]
+    Protocol(String),
     #[error("Winlink store I/O failed: {0}")]
     Io(#[from] std::io::Error),
     #[error("Winlink store JSON failed: {0}")]
@@ -292,6 +307,10 @@ impl WinlinkStore {
             .ok_or_else(|| WinlinkError::MessageNotFound(id.to_owned()))
     }
 
+    pub fn has_message(&self, id: &str) -> bool {
+        self.messages.iter().any(|message| message.id == id)
+    }
+
     fn next_message_id(&mut self) -> String {
         let id = format!("{}-{:04}", self.station, self.next_sequence);
         self.next_sequence += 1;
@@ -501,6 +520,126 @@ pub fn telnet_cms_check(config: TelnetCmsConfig) -> WinlinkResult<TransportStatu
     })
 }
 
+pub fn winlink_password_from_env() -> Option<String> {
+    std::env::var(WINLINK_PASSWORD_ENV)
+        .ok()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
+}
+
+pub fn telnet_cms_receive_sync(
+    store: &mut WinlinkStore,
+    store_path: Option<PathBuf>,
+    config: TelnetCmsConfig,
+    password: Option<&str>,
+) -> WinlinkResult<WinlinkSyncReport> {
+    let station = normalize_call(&config.station)?;
+    if !config.live {
+        return Ok(WinlinkSyncReport {
+            kind: "winlink-sync-report",
+            ok: true,
+            station: store.station.clone(),
+            transport: WinlinkTransportKind::Telnet,
+            dry_run: true,
+            live: false,
+            store_path,
+            inbox_received: 0,
+            outbox_sent: 0,
+            queued_remaining: store.messages_in(MailFolder::Outbox).len(),
+            notes: vec!["dry run only; pass --live to open a Telnet/CMS inbox session".to_owned()],
+        });
+    }
+
+    let mut session = TelnetCmsSession::connect(&config)?;
+    session.read_until_contains(&[b"Callsign", b"callsign"], TELNET_PROMPT_MAX_BYTES)?;
+    session.write_line(&station)?;
+    session.read_until_contains(&[b"Password", b"password"], TELNET_PROMPT_MAX_BYTES)?;
+    session.write_line(CMS_TELNET_PASSWORD)?;
+
+    let handshake = session.read_remote_handshake()?;
+    if let Some(challenge) = handshake.secure_challenge.as_deref() {
+        let password = password.ok_or(WinlinkError::MissingPasswordEnv(WINLINK_PASSWORD_ENV))?;
+        let response = secure_login_response(challenge, password);
+        session.write_line(&format!(";FW: {station}"))?;
+        session.write_line(&local_sid_line())?;
+        session.write_line(&format!(";PR: {response}"))?;
+    } else {
+        session.write_line(&format!(";FW: {station}"))?;
+        session.write_line(&local_sid_line())?;
+    }
+    session.write_line(&format!("; wl2k DE {station} ()"))?;
+
+    let mut pending = std::collections::HashMap::<String, PendingCmsMessage>::new();
+    let mut proposals = Vec::<InboundCmsProposal>::new();
+    let mut proposal_lines = Vec::<String>::new();
+    let mut added = 0;
+    let mut notes = vec![
+        "live Telnet/CMS authenticated; inbound proposals are listed and deferred".to_owned(),
+        "message bodies are not downloaded in this build, so CMS inbox contents remain pending"
+            .to_owned(),
+    ];
+
+    loop {
+        let line = session.read_line(B2F_LINE_MAX_BYTES)?;
+        if line.is_empty() {
+            continue;
+        }
+        if let Some(message) = PendingCmsMessage::parse(&line) {
+            pending.insert(message.mid.clone(), message);
+            continue;
+        }
+        if line.starts_with(';') {
+            continue;
+        }
+        match line.get(0..2).unwrap_or_default() {
+            "FA" | "FB" | "FC" | "FD" => {
+                let proposal = InboundCmsProposal::parse(&line)?;
+                proposal_lines.push(line);
+                proposals.push(proposal);
+            }
+            "F>" => {
+                verify_proposal_checksum(&proposal_lines, &line)?;
+                let answers = "=".repeat(proposals.len());
+                session.write_line(&format!("FS {answers}"))?;
+                for proposal in proposals.drain(..) {
+                    if add_metadata_message(store, &station, &proposal, pending.get(&proposal.mid))?
+                    {
+                        added += 1;
+                    }
+                }
+                proposal_lines.clear();
+                session.write_line("FQ")?;
+                break;
+            }
+            "FF" => {
+                notes.push("CMS reported no pending inbound proposals".to_owned());
+                session.write_line("FQ")?;
+                break;
+            }
+            "FQ" => break,
+            _ => {
+                return Err(WinlinkError::Protocol(format!(
+                    "unexpected protocol line: {line}"
+                )));
+            }
+        }
+    }
+
+    Ok(WinlinkSyncReport {
+        kind: "winlink-sync-report",
+        ok: true,
+        station: store.station.clone(),
+        transport: WinlinkTransportKind::Telnet,
+        dry_run: false,
+        live: true,
+        store_path,
+        inbox_received: added,
+        outbox_sent: 0,
+        queued_remaining: store.messages_in(MailFolder::Outbox).len(),
+        notes,
+    })
+}
+
 pub fn transport_plan_report(
     station: impl AsRef<str>,
     transport: WinlinkTransportKind,
@@ -583,6 +722,313 @@ pub fn guarded_dry_run_sync_report(
             transport.label()
         )],
     })
+}
+
+struct TelnetCmsSession {
+    stream: TcpStream,
+}
+
+impl TelnetCmsSession {
+    fn connect(config: &TelnetCmsConfig) -> WinlinkResult<Self> {
+        let endpoint = config.endpoint();
+        let address = endpoint
+            .to_socket_addrs()?
+            .next()
+            .ok_or_else(|| std::io::Error::other(format!("could not resolve {endpoint}")))?;
+        let timeout = Duration::from_millis(config.timeout_ms);
+        let stream = TcpStream::connect_timeout(&address, timeout)?;
+        stream.set_read_timeout(Some(timeout))?;
+        stream.set_write_timeout(Some(timeout))?;
+        Ok(Self { stream })
+    }
+
+    fn write_line(&mut self, line: &str) -> WinlinkResult<()> {
+        self.stream.write_all(line.as_bytes())?;
+        self.stream.write_all(b"\r")?;
+        self.stream.flush()?;
+        Ok(())
+    }
+
+    fn read_until_contains(
+        &mut self,
+        patterns: &[&[u8]],
+        max_bytes: usize,
+    ) -> WinlinkResult<String> {
+        let mut buffer = Vec::new();
+        let mut byte = [0_u8; 1];
+        while buffer.len() < max_bytes {
+            match self.stream.read(&mut byte) {
+                Ok(0) => break,
+                Ok(_) => {
+                    buffer.push(byte[0]);
+                    if patterns
+                        .iter()
+                        .any(|pattern| contains_ascii_case_insensitive(&buffer, pattern))
+                    {
+                        return Ok(String::from_utf8_lossy(&buffer).trim().to_owned());
+                    }
+                }
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                    ) =>
+                {
+                    return Err(WinlinkError::Protocol(
+                        "timed out waiting for Telnet/CMS prompt".to_owned(),
+                    ));
+                }
+                Err(error) => return Err(error.into()),
+            }
+        }
+        Err(WinlinkError::Protocol(
+            "Telnet/CMS prompt exceeded maximum length".to_owned(),
+        ))
+    }
+
+    fn read_remote_handshake(&mut self) -> WinlinkResult<RemoteHandshake> {
+        let mut handshake = RemoteHandshake::default();
+        loop {
+            let line = self.read_line(B2F_LINE_MAX_BYTES)?;
+            if line.is_empty() {
+                continue;
+            }
+            if line.starts_with('[') && line.ends_with(']') {
+                handshake.sid = Some(line);
+                continue;
+            }
+            if let Some(challenge) = parse_secure_challenge(&line) {
+                handshake.secure_challenge = Some(challenge);
+                continue;
+            }
+            if line.ends_with('>') {
+                handshake.prompt = Some(line);
+                break;
+            }
+            if line.starts_with("***") {
+                return Err(WinlinkError::Protocol(line));
+            }
+        }
+        Ok(handshake)
+    }
+
+    fn read_line(&mut self, max_bytes: usize) -> WinlinkResult<String> {
+        let mut buffer = Vec::new();
+        let mut byte = [0_u8; 1];
+        while buffer.len() < max_bytes {
+            match self.stream.read(&mut byte) {
+                Ok(0) => {
+                    if buffer.is_empty() {
+                        return Err(WinlinkError::Protocol(
+                            "Telnet/CMS connection closed".to_owned(),
+                        ));
+                    }
+                    break;
+                }
+                Ok(_) => match byte[0] {
+                    b'\r' | b'\n' => break,
+                    value => buffer.push(value),
+                },
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                    ) =>
+                {
+                    return Err(WinlinkError::Protocol(
+                        "timed out waiting for B2F line".to_owned(),
+                    ));
+                }
+                Err(error) => return Err(error.into()),
+            }
+        }
+        if buffer.len() >= max_bytes {
+            return Err(WinlinkError::Protocol(
+                "B2F line exceeded maximum length".to_owned(),
+            ));
+        }
+        Ok(String::from_utf8_lossy(&buffer).trim_end().to_owned())
+    }
+}
+
+#[derive(Default)]
+struct RemoteHandshake {
+    sid: Option<String>,
+    secure_challenge: Option<String>,
+    prompt: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct PendingCmsMessage {
+    to: String,
+    mid: String,
+    size: u64,
+    from: String,
+    subject: String,
+}
+
+impl PendingCmsMessage {
+    fn parse(line: &str) -> Option<Self> {
+        let payload = line.strip_prefix(";PM:")?.trim_start();
+        let parts = payload.splitn(5, char::is_whitespace).collect::<Vec<_>>();
+        if parts.len() != 5 {
+            return None;
+        }
+        Some(Self {
+            to: parts[0].to_owned(),
+            mid: parts[1].to_owned(),
+            size: parts[2].parse().ok()?,
+            from: parts[3].to_owned(),
+            subject: parts[4].to_owned(),
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+struct InboundCmsProposal {
+    code: String,
+    message_type: String,
+    mid: String,
+    byte_count: u64,
+    compressed_byte_count: u64,
+}
+
+impl InboundCmsProposal {
+    fn parse(line: &str) -> WinlinkResult<Self> {
+        let code = line.get(0..2).unwrap_or_default();
+        let parts = line[2..]
+            .split_whitespace()
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>();
+        if !matches!(code, "FA" | "FB" | "FC" | "FD") || parts.len() < 5 {
+            return Err(WinlinkError::InvalidB2fProposal(line.to_owned()));
+        }
+        let byte_count = parts[2]
+            .parse()
+            .map_err(|_| WinlinkError::InvalidB2fProposal(line.to_owned()))?;
+        let compressed_byte_count = parts[3]
+            .parse()
+            .map_err(|_| WinlinkError::InvalidB2fProposal(line.to_owned()))?;
+        Ok(Self {
+            code: code.to_owned(),
+            message_type: parts[0].to_owned(),
+            mid: parts[1].to_owned(),
+            byte_count,
+            compressed_byte_count,
+        })
+    }
+}
+
+fn add_metadata_message(
+    store: &mut WinlinkStore,
+    station: &str,
+    proposal: &InboundCmsProposal,
+    pending: Option<&PendingCmsMessage>,
+) -> WinlinkResult<bool> {
+    if store.has_message(&proposal.mid) {
+        return Ok(false);
+    }
+    let from = pending
+        .map(|message| normalize_recipient(&message.from))
+        .transpose()?
+        .unwrap_or_else(|| "UNKNOWN@winlink.org".to_owned());
+    let to = pending
+        .map(|message| normalize_recipient(&message.to))
+        .transpose()?
+        .unwrap_or_else(|| format!("{station}@winlink.org"));
+    let subject = pending
+        .map(|message| message.subject.clone())
+        .unwrap_or_else(|| format!("Winlink message {}", proposal.mid));
+    let reported_size = pending
+        .map(|message| message.size)
+        .unwrap_or(proposal.byte_count);
+    let body = format!(
+        "Winlink CMS reports this message is pending.\n\nMessage ID: {}\nFrom: {}\nTo: {}\nSubject: {}\nProposal: {} {}\nUncompressed bytes: {}\nCompressed bytes: {}\n\nchattybara deferred the payload during live Telnet/CMS sync, so the message remains pending on the CMS for a later full B2F download.",
+        proposal.mid,
+        from,
+        to,
+        subject,
+        proposal.code,
+        proposal.message_type,
+        reported_size,
+        proposal.compressed_byte_count
+    );
+    store.messages.push(WinlinkMessage {
+        id: proposal.mid.clone(),
+        folder: MailFolder::Inbox,
+        state: MessageState::Received,
+        from,
+        to: vec![to],
+        subject,
+        body,
+        attachments: Vec::new(),
+        transport: Some(WinlinkTransportKind::Telnet),
+        last_error: Some("payload deferred; body not downloaded".to_owned()),
+    });
+    Ok(true)
+}
+
+fn local_sid_line() -> String {
+    format!("[chattybara-{}-B2FHM$]", env!("CARGO_PKG_VERSION"))
+}
+
+fn parse_secure_challenge(line: &str) -> Option<String> {
+    let value = line.strip_prefix(";PQ")?;
+    Some(
+        value
+            .trim_start_matches(':')
+            .split_whitespace()
+            .next()?
+            .to_owned(),
+    )
+}
+
+fn secure_login_response(challenge: &str, password: &str) -> String {
+    let mut hasher = Md5::new();
+    hasher.update(challenge.as_bytes());
+    hasher.update(password.as_bytes());
+    hasher.update(WINLINK_SECURE_SALT);
+    let digest = hasher.finalize();
+    let mut response = u32::from(digest[3] & 0x3f);
+    for index in (0..=2).rev() {
+        response = (response << 8) | u32::from(digest[index]);
+    }
+    let token = format!("{response:08}");
+    token[token.len().saturating_sub(8)..].to_owned()
+}
+
+fn verify_proposal_checksum(lines: &[String], checksum_line: &str) -> WinlinkResult<()> {
+    let Some(value) = checksum_line.strip_prefix("F>") else {
+        return Err(WinlinkError::Protocol(format!(
+            "invalid proposal checksum line: {checksum_line}"
+        )));
+    };
+    let actual = u8::from_str_radix(value.trim(), 16)
+        .map_err(|_| WinlinkError::Protocol(format!("invalid B2F checksum: {checksum_line}")))?;
+    let expected = proposal_checksum(lines);
+    if actual != expected {
+        return Err(WinlinkError::Protocol(format!(
+            "B2F proposal checksum mismatch: expected {expected:02X}, got {actual:02X}"
+        )));
+    }
+    Ok(())
+}
+
+fn proposal_checksum(lines: &[String]) -> u8 {
+    let mut sum = 0_i64;
+    for line in lines {
+        for byte in line.bytes() {
+            sum += i64::from(byte);
+        }
+        sum += i64::from(b'\r');
+    }
+    ((-sum) & 0xff) as u8
+}
+
+fn contains_ascii_case_insensitive(haystack: &[u8], needle: &[u8]) -> bool {
+    haystack
+        .windows(needle.len())
+        .any(|window| window.eq_ignore_ascii_case(needle))
 }
 
 pub fn default_store_path(station: impl AsRef<str>) -> WinlinkResult<PathBuf> {
@@ -679,7 +1125,8 @@ fn sha256_hex(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::net::TcpListener;
+    use std::io::{BufRead, BufReader};
+    use std::net::{TcpListener, TcpStream};
     use std::thread;
     use tempfile::tempdir;
 
@@ -687,18 +1134,18 @@ mod tests {
     fn store_queues_and_persists_messages() {
         let dir = tempdir().expect("tempdir");
         let path = dir.path().join("store.json");
-        let mut store = WinlinkStore::new("ve3tst").expect("store");
-        store.set_account(WinlinkAccount::new("ve3tst", CredentialSource::Env).expect("account"));
+        let mut store = WinlinkStore::new("ja1tst").expect("store");
+        store.set_account(WinlinkAccount::new("ja1tst", CredentialSource::Env).expect("account"));
         let id = store
             .queue_message(vec!["ja1qso".to_owned()], "Subject", "Body", Vec::new())
             .expect("queue");
         store.save(&path).expect("save");
 
-        let loaded = WinlinkStore::load_or_new(&path, "VE3TST").expect("load");
-        assert_eq!(loaded.station, "VE3TST");
+        let loaded = WinlinkStore::load_or_new(&path, "JA1TST").expect("load");
+        assert_eq!(loaded.station, "JA1TST");
         assert_eq!(
             loaded.account.as_ref().expect("account").address,
-            "VE3TST@winlink.org"
+            "JA1TST@winlink.org"
         );
         let message = loaded.find_message(&id).expect("message");
         assert_eq!(message.to, vec!["JA1QSO@winlink.org"]);
@@ -707,7 +1154,7 @@ mod tests {
 
     #[test]
     fn fake_sync_receives_inbox_and_sends_outbox() {
-        let mut store = WinlinkStore::new("ve3tst").expect("store");
+        let mut store = WinlinkStore::new("ja1tst").expect("store");
         store
             .queue_message(
                 vec!["ja1qso@winlink.org".to_owned()],
@@ -731,7 +1178,7 @@ mod tests {
 
     #[test]
     fn b2f_proposal_roundtrips() {
-        let mut store = WinlinkStore::new("ve3tst").expect("store");
+        let mut store = WinlinkStore::new("ja1tst").expect("store");
         let id = store
             .queue_message(vec!["ja1qso".to_owned()], "B2F subject", "Body", Vec::new())
             .expect("queue");
@@ -744,7 +1191,7 @@ mod tests {
     #[test]
     fn telnet_check_is_dry_run_unless_live() {
         let report = telnet_cms_check(TelnetCmsConfig {
-            station: "ve3tst".to_owned(),
+            station: "ja1tst".to_owned(),
             host: "example.invalid".to_owned(),
             port: DEFAULT_CMS_PORT,
             timeout_ms: 1,
@@ -766,7 +1213,7 @@ mod tests {
         });
 
         let report = telnet_cms_check(TelnetCmsConfig {
-            station: "ve3tst".to_owned(),
+            station: "ja1tst".to_owned(),
             host: "127.0.0.1".to_owned(),
             port: address.port(),
             timeout_ms: 1000,
@@ -782,8 +1229,82 @@ mod tests {
     }
 
     #[test]
+    fn secure_login_response_matches_known_vector() {
+        assert_eq!(secure_login_response("23753528", "FooBar"), "95074758");
+    }
+
+    #[test]
+    fn telnet_receive_sync_lists_and_defers_fake_cms_inbox() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
+        let address = listener.local_addr().expect("address");
+        let handle = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept");
+            let read_stream = stream.try_clone().expect("clone");
+            let mut reader = BufReader::new(read_stream);
+
+            stream.write_all(b"Callsign :").expect("write callsign");
+            assert_eq!(read_cr_line(&mut reader), "JA1TST");
+            stream.write_all(b"Password :").expect("write password");
+            assert_eq!(read_cr_line(&mut reader), CMS_TELNET_PASSWORD);
+            stream
+                .write_all(b"[WL2K-5.0-B2FHM$]\r;PQ: 23753528\rCMS>\r")
+                .expect("write handshake");
+            assert_eq!(read_cr_line(&mut reader), ";FW: JA1TST");
+            assert!(
+                read_cr_line(&mut reader).starts_with("[chattybara-"),
+                "local SID"
+            );
+            assert_eq!(read_cr_line(&mut reader), ";PR: 95074758");
+            assert_eq!(read_cr_line(&mut reader), "; wl2k DE JA1TST ()");
+
+            let proposal = "FC EM TESTMID123 128 64 0".to_owned();
+            let checksum = proposal_checksum(std::slice::from_ref(&proposal));
+            stream
+                .write_all(
+                    format!(
+                        ";PM: JA1TST TESTMID123 128 JA1QSO Test subject\r{proposal}\rF> {checksum:02X}\r"
+                    )
+                    .as_bytes(),
+                )
+                .expect("write proposals");
+            assert_eq!(read_cr_line(&mut reader), "FS =");
+            assert_eq!(read_cr_line(&mut reader), "FQ");
+        });
+
+        let mut store = WinlinkStore::new("ja1tst").expect("store");
+        let report = telnet_cms_receive_sync(
+            &mut store,
+            None,
+            TelnetCmsConfig {
+                station: "ja1tst".to_owned(),
+                host: "127.0.0.1".to_owned(),
+                port: address.port(),
+                timeout_ms: 1000,
+                live: true,
+            },
+            Some("FooBar"),
+        )
+        .expect("sync");
+        handle.join().expect("join");
+
+        assert!(report.ok);
+        assert_eq!(report.inbox_received, 1);
+        assert_eq!(report.queued_remaining, 0);
+        let message = store.find_message("TESTMID123").expect("message");
+        assert_eq!(message.folder, MailFolder::Inbox);
+        assert_eq!(message.from, "JA1QSO@winlink.org");
+        assert_eq!(message.to, vec!["JA1TST@winlink.org"]);
+        assert_eq!(message.subject, "Test subject");
+        assert!(message.body.contains("payload during live Telnet/CMS sync"));
+        assert_eq!(
+            message.last_error.as_deref(),
+            Some("payload deferred; body not downloaded")
+        );
+    }
+
+    #[test]
     fn non_fake_live_sync_is_guarded() {
-        let mut store = WinlinkStore::new("ve3tst").expect("store");
+        let mut store = WinlinkStore::new("ja1tst").expect("store");
         store
             .queue_message(vec!["ja1qso".to_owned()], "Subject", "Body", Vec::new())
             .expect("queue");
@@ -797,5 +1318,14 @@ mod tests {
             guarded_dry_run_sync_report(&store, None, WinlinkTransportKind::Vara, true, true)
                 .expect_err("not implemented");
         assert!(error.to_string().contains("not implemented"));
+    }
+
+    fn read_cr_line(reader: &mut BufReader<TcpStream>) -> String {
+        let mut bytes = Vec::new();
+        reader.read_until(b'\r', &mut bytes).expect("read line");
+        while matches!(bytes.last(), Some(b'\r' | b'\n')) {
+            bytes.pop();
+        }
+        String::from_utf8(bytes).expect("utf8")
     }
 }

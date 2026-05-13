@@ -2604,7 +2604,7 @@ mod tests {
             }),
         })
         .expect("app");
-        app.apply_line("/station ve3tst").expect("station");
+        app.apply_line("/station ja1tst").expect("station");
         app.apply_line("/backend native-local-node")
             .expect("backend");
         app.apply_line("/peer ja1qso").expect("peer");
@@ -2843,8 +2843,8 @@ mod tests {
         assert!(rendered.contains("safety DRY RUN"));
         assert!(rendered.contains("focus setup/radio"));
 
-        app.apply_line("/station ve3tst").expect("station");
-        assert!(app.status_text().starts_with("VE3TST |"));
+        app.apply_line("/station ja1tst").expect("station");
+        assert!(app.status_text().starts_with("JA1TST |"));
 
         let backend = ratatui::backend::TestBackend::new(120, 32);
         let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
@@ -2856,8 +2856,8 @@ mod tests {
             .iter()
             .map(|cell| cell.symbol())
             .collect::<String>();
-        assert!(rendered.contains("VE3TST | backend"));
-        assert!(rendered.contains("station VE3TST"));
+        assert!(rendered.contains("JA1TST | backend"));
+        assert!(rendered.contains("station JA1TST"));
     }
 
     #[test]
@@ -3073,7 +3073,7 @@ mod tests {
             let rendered = render_app_text(&app, width, height);
             let first_row = rendered.lines().next().unwrap_or_default();
             assert!(
-                first_row.contains("VE3TST"),
+                first_row.contains("JA1TST"),
                 "status did not show pending setup station at {width}x{height}:\n{rendered}"
             );
             assert!(
@@ -3081,7 +3081,7 @@ mod tests {
                 "status did not show pending setup backend at {width}x{height}:\n{rendered}"
             );
             for label in [
-                "station VE3TST",
+                "station JA1TST",
                 "backend local-node",
                 "peer JA1QSO",
                 "node listen 127.0.0.1:0",

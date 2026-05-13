@@ -13,7 +13,7 @@ modem lab material.
 
 ## Status
 
-Current release: `0.1.0-alpha.3`.
+Current release: `0.1.0-alpha.4`.
 
 This is a public alpha for no-hardware chat-client development. It is useful
 for TUI workflow testing, local peer/node sessions, mailbox and file-offer
@@ -39,7 +39,8 @@ Included:
   operator-console workspaces.
 - Early Winlink mailbox workflow: local account/store, compose/read/list,
   deterministic fake sync, B2F proposal modeling, Telnet/CMS dry-run checks,
-  and guarded VARA/orca transport status surfaces.
+  receive-only live inbox metadata sync, and guarded VARA/orca transport
+  status surfaces.
 - Local format, clippy, tests, and no-hardware lab checks.
 
 Not included:
@@ -49,6 +50,7 @@ Not included:
   traffic, hosted CI, or live serial/audio access.
 - Protocol-specific compatibility claims. Those belong in backend-specific
   projects and documented release notes.
+- Full Winlink body download, attachment download, and live sending.
 
 ## Repositories
 
@@ -121,10 +123,13 @@ cargo run -p chattybara-cli -- chat tui
 - `chattybara rig ic705`, `rig profile`, and `rig hamlib` provide dry-run-first
   radio setup and guarded live control.
 - `chattybara station modes`, `fake-events`, `replay`, `guard`, and `external`
-  expose the station-core registry and safety gates for future modes.
+  expose local station settings, the station-core registry, and safety gates
+  for future modes.
 - `chattybara winlink account`, `compose`, `inbox`, `outbox`, `read`, `sync`,
   `telnet`, and `transport` expose the no-radio Winlink mailbox workflow and
-  guarded Telnet/CMS, VARA, and orca transport surfaces.
+  guarded Telnet/CMS, VARA, and orca transport surfaces. Live Telnet/CMS sync
+  can authenticate and list pending inbox metadata while deferring message
+  bodies.
 - `chattybara lab run`, `snapshot`, and `compare` run no-hardware release
   checks.
 
@@ -133,6 +138,7 @@ cargo run -p chattybara-cli -- chat tui
 Start with:
 
 ```sh
+chattybara station config --station CALL
 chattybara chat tui
 ```
 

@@ -4,7 +4,7 @@ use std::collections::{HashMap, VecDeque};
 use std::fmt::Write as FmtWrite;
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
-use std::net::TcpListener;
+use std::net::{TcpListener, TcpStream};
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
 use std::thread;
@@ -12,14 +12,23 @@ use std::time::{Duration, Instant};
 use tempfile::tempdir;
 
 fn chattybara() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_chattybara"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_chattybara"));
+    command.env(
+        "CHATTYBARA_SETTINGS",
+        "target/test-no-local-chattybara-settings.toml",
+    );
+    command
 }
 
 fn run_json(args: &[&str]) -> Value {
     let output = chattybara().args(args).output().expect("run chattybara");
+    json_from_success(output, &format!("{args:?}"))
+}
+
+fn json_from_success(output: Output, context: &str) -> Value {
     assert!(
         output.status.success(),
-        "command failed\nargs: {args:?}\nstdout: {}\nstderr: {}",
+        "command failed\ncontext: {context}\nstdout: {}\nstderr: {}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
@@ -244,7 +253,7 @@ fn chat_tui_help_exposes_fake_backend() {
     let help = run_text(&["chat", "tui", "--help"]);
 
     assert!(help.contains("--station"));
-    assert!(help.contains("Bare `chattybara chat tui` starts setup"));
+    assert!(help.contains("chattybara station config --station CALL"));
     assert!(help.contains("--backend"));
     assert!(help.contains("--setup-preview"));
     assert!(help.contains("fake"));
@@ -281,13 +290,52 @@ fn chat_tui_setup_preview_works_without_required_flags() {
         "tui",
         "--setup-preview",
         "--station",
-        "ve3tst",
+        "ja1tst",
         "--peer",
         "ja1qso",
     ]);
 
-    assert_eq!(preview["station"], "VE3TST");
+    assert_eq!(preview["station"], "JA1TST");
     assert_eq!(preview["peer"], "JA1QSO");
+}
+
+#[test]
+fn local_station_settings_feed_tui_and_winlink_defaults() {
+    let dir = tempdir().expect("tempdir");
+    let settings = dir.path().join("settings.toml");
+    let settings_arg = path_arg(&settings);
+
+    let config = run_json(&[
+        "station",
+        "config",
+        "--station",
+        "ja1abc",
+        "--path",
+        &settings_arg,
+    ]);
+    assert_eq!(config["kind"], "station-local-settings-report");
+    assert_eq!(config["settings"]["station"], "JA1ABC");
+    assert!(settings.exists());
+
+    let preview = json_from_success(
+        chattybara()
+            .args(["chat", "tui", "--setup-preview"])
+            .env("CHATTYBARA_SETTINGS", &settings)
+            .output()
+            .expect("run chattybara"),
+        "chat tui setup preview with local station settings",
+    );
+    assert_eq!(preview["station"], "JA1ABC");
+
+    let telnet = json_from_success(
+        chattybara()
+            .args(["winlink", "telnet", "--check"])
+            .env("CHATTYBARA_SETTINGS", &settings)
+            .output()
+            .expect("run chattybara"),
+        "winlink telnet with local station settings",
+    );
+    assert_eq!(telnet["transport_status"]["station"], "JA1ABC");
 }
 
 #[test]
@@ -317,22 +365,22 @@ fn winlink_fake_sync_exercises_mail_store_without_radio() {
         "account",
         "setup",
         "--station",
-        "ve3tst",
+        "ja1tst",
         "--store",
         &store_arg,
         "--password-source",
         "env",
     ]);
     assert_eq!(account["kind"], "winlink-account-setup-report");
-    assert_eq!(account["station"], "VE3TST");
-    assert_eq!(account["address"], "VE3TST@winlink.org");
+    assert_eq!(account["station"], "JA1TST");
+    assert_eq!(account["address"], "JA1TST@winlink.org");
     assert_eq!(account["password_source"], "env");
 
     let compose = run_json(&[
         "winlink",
         "compose",
         "--station",
-        "ve3tst",
+        "ja1tst",
         "--store",
         &store_arg,
         "--to",
@@ -343,7 +391,7 @@ fn winlink_fake_sync_exercises_mail_store_without_radio() {
         "Testing Winlink fake sync",
     ]);
     assert_eq!(compose["kind"], "winlink-compose-report");
-    assert_eq!(compose["station"], "VE3TST");
+    assert_eq!(compose["station"], "JA1TST");
     assert_eq!(compose["folder"], "outbox");
     assert_eq!(compose["b2f_proposal"]["subject"], "No radio test");
     let message_id = compose["message_id"].as_str().expect("message id");
@@ -352,7 +400,7 @@ fn winlink_fake_sync_exercises_mail_store_without_radio() {
         "winlink",
         "outbox",
         "--station",
-        "ve3tst",
+        "ja1tst",
         "--store",
         &store_arg,
     ]);
@@ -364,7 +412,7 @@ fn winlink_fake_sync_exercises_mail_store_without_radio() {
         "winlink",
         "sync",
         "--station",
-        "ve3tst",
+        "ja1tst",
         "--store",
         &store_arg,
         "--transport",
@@ -380,7 +428,7 @@ fn winlink_fake_sync_exercises_mail_store_without_radio() {
         "winlink",
         "inbox",
         "--station",
-        "ve3tst",
+        "ja1tst",
         "--store",
         &store_arg,
     ]);
@@ -392,18 +440,18 @@ fn winlink_fake_sync_exercises_mail_store_without_radio() {
         "read",
         inbox_id,
         "--station",
-        "ve3tst",
+        "ja1tst",
         "--store",
         &store_arg,
     ]);
     assert_eq!(message["kind"], "winlink-message-report");
     assert_eq!(message["message"]["folder"], "inbox");
-    assert_eq!(message["message"]["to"][0], "VE3TST@winlink.org");
+    assert_eq!(message["message"]["to"][0], "JA1TST@winlink.org");
 }
 
 #[test]
 fn winlink_transport_surfaces_are_guarded() {
-    let telnet = run_json(&["winlink", "telnet", "--station", "ve3tst", "--check"]);
+    let telnet = run_json(&["winlink", "telnet", "--station", "ja1tst", "--check"]);
     assert_eq!(telnet["kind"], "winlink-telnet-check-report");
     assert_eq!(telnet["transport_status"]["transport"], "telnet-cms");
     assert_eq!(telnet["transport_status"]["dry_run"], true);
@@ -413,7 +461,7 @@ fn winlink_transport_surfaces_are_guarded() {
         "winlink",
         "transport",
         "--station",
-        "ve3tst",
+        "ja1tst",
         "--transport",
         "vara",
     ]);
@@ -431,7 +479,7 @@ fn winlink_transport_surfaces_are_guarded() {
         "winlink",
         "transport",
         "--station",
-        "ve3tst",
+        "ja1tst",
         "--transport",
         "orca",
     ]);
@@ -446,6 +494,108 @@ fn winlink_transport_surfaces_are_guarded() {
 }
 
 #[test]
+fn winlink_telnet_live_sync_lists_fake_cms_inbox() {
+    let dir = tempdir().expect("tempdir");
+    let store = dir.path().join("winlink-store.json");
+    let store_arg = path_arg(&store);
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
+    let address = listener.local_addr().expect("address");
+    let handle = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept");
+        let mut reader = BufReader::new(stream.try_clone().expect("clone"));
+
+        stream.write_all(b"Callsign :").expect("write callsign");
+        assert_eq!(read_nonempty_cr_line(&mut reader), "JA1TST");
+        stream.write_all(b"Password :").expect("write password");
+        assert_eq!(read_nonempty_cr_line(&mut reader), "CMSTelnet");
+        stream
+            .write_all(b"[WL2K-5.0-B2FHM$]\r;PQ: 23753528\rCMS>\r")
+            .expect("write handshake");
+        assert_eq!(read_nonempty_cr_line(&mut reader), ";FW: JA1TST");
+        assert!(read_nonempty_cr_line(&mut reader).starts_with("[chattybara-"));
+        assert_eq!(read_nonempty_cr_line(&mut reader), ";PR: 95074758");
+        assert_eq!(read_nonempty_cr_line(&mut reader), "; wl2k DE JA1TST ()");
+
+        let proposal = "FC EM CLI-MID-1 256 128 0".to_owned();
+        let checksum = b2f_checksum(std::slice::from_ref(&proposal));
+        stream
+            .write_all(
+                format!(
+                    ";PM: JA1TST CLI-MID-1 256 JA1QSO CLI subject\r{proposal}\rF> {checksum:02X}\r"
+                )
+                .as_bytes(),
+            )
+            .expect("write proposals");
+        assert_eq!(read_nonempty_cr_line(&mut reader), "FS =");
+        assert_eq!(read_nonempty_cr_line(&mut reader), "FQ");
+    });
+
+    let output = chattybara()
+        .args([
+            "winlink",
+            "sync",
+            "--station",
+            "ja1tst",
+            "--store",
+            &store_arg,
+            "--transport",
+            "telnet",
+            "--live",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            &address.port().to_string(),
+            "--timeout-ms",
+            "5000",
+        ])
+        .env("CHATTYBARA_WINLINK_PASSWORD", "FooBar")
+        .output()
+        .expect("run chattybara");
+    handle.join().expect("join");
+    assert!(
+        output.status.success(),
+        "command failed\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let sync: Value = serde_json::from_slice(&output.stdout).expect("sync json");
+    assert_eq!(sync["kind"], "winlink-sync-report");
+    assert_eq!(sync["transport"], "telnet-cms");
+    assert_eq!(sync["live"], true);
+    assert_eq!(sync["inbox_received"], 1);
+    assert_eq!(sync["outbox_sent"], 0);
+
+    let inbox = run_json(&[
+        "winlink",
+        "inbox",
+        "--station",
+        "ja1tst",
+        "--store",
+        &store_arg,
+    ]);
+    assert_eq!(inbox["message_count"], 1);
+    assert_eq!(inbox["messages"][0]["id"], "CLI-MID-1");
+    assert_eq!(inbox["messages"][0]["subject"], "CLI subject");
+
+    let message = run_json(&[
+        "winlink",
+        "read",
+        "CLI-MID-1",
+        "--station",
+        "ja1tst",
+        "--store",
+        &store_arg,
+    ]);
+    assert_eq!(message["message"]["from"], "JA1QSO@winlink.org");
+    assert!(
+        message["message"]["body"]
+            .as_str()
+            .expect("body")
+            .contains("deferred the payload")
+    );
+}
+
+#[test]
 fn winlink_live_non_fake_send_requires_explicit_allow_send() {
     let dir = tempdir().expect("tempdir");
     let store = dir.path().join("winlink-store.json");
@@ -455,7 +605,7 @@ fn winlink_live_non_fake_send_requires_explicit_allow_send() {
         "winlink",
         "compose",
         "--station",
-        "ve3tst",
+        "ja1tst",
         "--store",
         &store_arg,
         "--to",
@@ -470,7 +620,7 @@ fn winlink_live_non_fake_send_requires_explicit_allow_send() {
         "winlink",
         "sync",
         "--station",
-        "ve3tst",
+        "ja1tst",
         "--store",
         &store_arg,
         "--transport",
@@ -2139,4 +2289,34 @@ fn spawn_fake_rigctld(commands: Vec<(String, Vec<String>)>) -> String {
         }
     });
     address
+}
+
+fn read_cr_line(reader: &mut BufReader<TcpStream>) -> String {
+    let mut bytes = Vec::new();
+    reader.read_until(b'\r', &mut bytes).expect("read line");
+    while matches!(bytes.last(), Some(b'\r' | b'\n')) {
+        bytes.pop();
+    }
+    String::from_utf8(bytes).expect("utf8")
+}
+
+fn read_nonempty_cr_line(reader: &mut BufReader<TcpStream>) -> String {
+    for _ in 0..4 {
+        let line = read_cr_line(reader);
+        if !line.is_empty() {
+            return line;
+        }
+    }
+    panic!("expected non-empty CR-terminated line")
+}
+
+fn b2f_checksum(lines: &[String]) -> u8 {
+    let mut sum = 0_i64;
+    for line in lines {
+        for byte in line.bytes() {
+            sum += i64::from(byte);
+        }
+        sum += i64::from(b'\r');
+    }
+    ((-sum) & 0xff) as u8
 }

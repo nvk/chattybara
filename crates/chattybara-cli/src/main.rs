@@ -26,7 +26,8 @@ use chattybara_winlink::{
     B2fProposal, CredentialSource, DEFAULT_CMS_HOST, DEFAULT_CMS_PORT, DEFAULT_TELNET_TIMEOUT_MS,
     MailFolder, TelnetCmsConfig, WinlinkAccount, WinlinkAttachment, WinlinkStore,
     WinlinkTransportKind, default_store_path, fake_sync, guarded_dry_run_sync_report,
-    telnet_cms_check, transport_plan_report,
+    normalize_call, telnet_cms_check, telnet_cms_receive_sync, transport_plan_report,
+    winlink_password_from_env,
 };
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use hamlib::{
@@ -60,6 +61,7 @@ use radio_profile::{
     RadioProfileTemplate, default_radio_profile, load_radio_profile, radio_profile_toml,
     validate_radio_profile,
 };
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::fs;
@@ -67,6 +69,9 @@ use std::path::{Path, PathBuf};
 use tui::{
     ChatTuiBackend, ChatTuiConfig, ChatTuiLocalNodeConfig, ChatTuiSetupConfig, run_chat_tui,
 };
+
+const DEFAULT_SAMPLE_STATION: &str = "JA1TST";
+const LOCAL_SETTINGS_ENV: &str = "CHATTYBARA_SETTINGS";
 
 #[derive(Debug, Parser)]
 #[command(name = "chattybara")]
@@ -212,10 +217,9 @@ struct ChatParseLogArgs {
 struct ChatTuiArgs {
     #[arg(
         long,
-        default_value = "JA1TST",
-        help = "Station call sign. Bare `chattybara chat tui` starts setup; use /station CALL in the TUI before on-air use."
+        help = "Station call sign. Overrides the local setting from `chattybara station config --station CALL`."
     )]
-    station: String,
+    station: Option<String>,
     #[arg(
         long,
         value_name = "BACKEND",
@@ -253,11 +257,20 @@ struct StationArgs {
 
 #[derive(Debug, Subcommand)]
 enum StationCommand {
+    Config(StationConfigArgs),
     Modes(StationModesArgs),
     FakeEvents(StationFakeEventsArgs),
     Replay(StationReplayArgs),
     Guard(StationGuardArgs),
     External(StationExternalArgs),
+}
+
+#[derive(Debug, Args)]
+struct StationConfigArgs {
+    #[arg(long, help = "Save the local station call sign for future commands.")]
+    station: Option<String>,
+    #[arg(long, help = "Override the settings file path.")]
+    path: Option<PathBuf>,
 }
 
 #[derive(Debug, Args)]
@@ -356,8 +369,8 @@ enum WinlinkAccountCommand {
 
 #[derive(Debug, Args)]
 struct WinlinkAccountSetupArgs {
-    #[arg(long, default_value = "JA1TST")]
-    station: String,
+    #[arg(long)]
+    station: Option<String>,
     #[arg(long)]
     store: Option<PathBuf>,
     #[arg(long = "password-source", value_enum, default_value = "none")]
@@ -366,8 +379,8 @@ struct WinlinkAccountSetupArgs {
 
 #[derive(Debug, Args)]
 struct WinlinkComposeArgs {
-    #[arg(long, default_value = "JA1TST")]
-    station: String,
+    #[arg(long)]
+    station: Option<String>,
     #[arg(long)]
     store: Option<PathBuf>,
     #[arg(long, required = true)]
@@ -382,8 +395,8 @@ struct WinlinkComposeArgs {
 
 #[derive(Debug, Args)]
 struct WinlinkMailboxArgs {
-    #[arg(long, default_value = "JA1TST")]
-    station: String,
+    #[arg(long)]
+    station: Option<String>,
     #[arg(long)]
     store: Option<PathBuf>,
 }
@@ -391,16 +404,16 @@ struct WinlinkMailboxArgs {
 #[derive(Debug, Args)]
 struct WinlinkReadArgs {
     message_id: String,
-    #[arg(long, default_value = "JA1TST")]
-    station: String,
+    #[arg(long)]
+    station: Option<String>,
     #[arg(long)]
     store: Option<PathBuf>,
 }
 
 #[derive(Debug, Args)]
 struct WinlinkSyncArgs {
-    #[arg(long, default_value = "JA1TST")]
-    station: String,
+    #[arg(long)]
+    station: Option<String>,
     #[arg(long)]
     store: Option<PathBuf>,
     #[arg(long, value_enum, default_value = "fake")]
@@ -419,8 +432,8 @@ struct WinlinkSyncArgs {
 
 #[derive(Debug, Args)]
 struct WinlinkTelnetArgs {
-    #[arg(long, default_value = "JA1TST")]
-    station: String,
+    #[arg(long)]
+    station: Option<String>,
     #[arg(long, default_value = DEFAULT_CMS_HOST)]
     host: String,
     #[arg(long, default_value_t = DEFAULT_CMS_PORT)]
@@ -435,8 +448,8 @@ struct WinlinkTelnetArgs {
 
 #[derive(Debug, Args)]
 struct WinlinkTransportArgs {
-    #[arg(long, default_value = "JA1TST")]
-    station: String,
+    #[arg(long)]
+    station: Option<String>,
     #[arg(long, value_enum)]
     transport: WinlinkTransportArg,
     #[arg(long)]
@@ -1090,6 +1103,26 @@ fn main() -> Result<()> {
 
 fn run_station(args: StationArgs) -> Result<()> {
     match args.command {
+        StationCommand::Config(args) => {
+            let path = args.path.unwrap_or_else(default_local_settings_path);
+            let mut settings = load_local_settings_from(&path)?;
+            let updated = if let Some(station) = args.station {
+                settings.station = Some(normalize_call(&station)?);
+                save_local_settings_to(&path, &settings)?;
+                true
+            } else {
+                false
+            };
+            let report = json!({
+                "kind": "station-local-settings-report",
+                "ok": true,
+                "updated": updated,
+                "path": path,
+                "settings": settings,
+            });
+            println!("{}", serde_json::to_string_pretty(&report)?);
+            Ok(())
+        }
         StationCommand::Modes(_args) => {
             let modes = built_in_modes();
             let report = json!({
@@ -1374,6 +1407,7 @@ fn run_chat(args: ChatArgs) -> Result<()> {
             Ok(())
         }
         ChatCommand::Tui(args) => {
+            let station = resolve_station(args.station.as_deref())?;
             let channel = ChannelConfig {
                 gain: args.gain,
                 snr_db: args.snr_db,
@@ -1400,7 +1434,7 @@ fn run_chat(args: ChatArgs) -> Result<()> {
                 None
             };
             if args.setup_preview {
-                let preview = chat_tui_setup_preview(&args.station, backend, setup.as_ref());
+                let preview = chat_tui_setup_preview(&station, backend, setup.as_ref());
                 println!("{}", serde_json::to_string_pretty(&preview)?);
                 return Ok(());
             }
@@ -1417,7 +1451,7 @@ fn run_chat(args: ChatArgs) -> Result<()> {
                 )?
             };
             run_chat_tui(ChatTuiConfig {
-                station_call: args.station,
+                station_call: station,
                 backend,
                 local_node,
                 setup,
@@ -1430,10 +1464,11 @@ fn run_winlink(args: WinlinkArgs) -> Result<()> {
     match args.command {
         WinlinkCommand::Account(args) => match args.command {
             WinlinkAccountCommand::Setup(args) => {
-                let store_path = resolve_winlink_store_path(args.store, &args.station)?;
-                let mut store = WinlinkStore::load_or_new(&store_path, &args.station)
+                let station = resolve_station(args.station.as_deref())?;
+                let store_path = resolve_winlink_store_path(args.store, &station)?;
+                let mut store = WinlinkStore::load_or_new(&store_path, &station)
                     .with_context(|| format!("loading {}", store_path.display()))?;
-                let account = WinlinkAccount::new(&args.station, args.password_source.into())?;
+                let account = WinlinkAccount::new(&station, args.password_source.into())?;
                 store.set_account(account.clone());
                 store
                     .save(&store_path)
@@ -1452,8 +1487,9 @@ fn run_winlink(args: WinlinkArgs) -> Result<()> {
                 Ok(())
             }
             WinlinkAccountCommand::Status(args) => {
-                let store_path = resolve_winlink_store_path(args.store, &args.station)?;
-                let store = WinlinkStore::load_or_new(&store_path, &args.station)
+                let station = resolve_station(args.station.as_deref())?;
+                let store_path = resolve_winlink_store_path(args.store, &station)?;
+                let store = WinlinkStore::load_or_new(&store_path, &station)
                     .with_context(|| format!("loading {}", store_path.display()))?;
                 println!(
                     "{}",
@@ -1473,8 +1509,9 @@ fn run_winlink(args: WinlinkArgs) -> Result<()> {
             }
         },
         WinlinkCommand::Compose(args) => {
-            let store_path = resolve_winlink_store_path(args.store, &args.station)?;
-            let mut store = WinlinkStore::load_or_new(&store_path, &args.station)
+            let station = resolve_station(args.station.as_deref())?;
+            let store_path = resolve_winlink_store_path(args.store, &station)?;
+            let mut store = WinlinkStore::load_or_new(&store_path, &station)
                 .with_context(|| format!("loading {}", store_path.display()))?;
             let attachments = args
                 .attachments
@@ -1504,8 +1541,9 @@ fn run_winlink(args: WinlinkArgs) -> Result<()> {
         WinlinkCommand::Inbox(args) => run_winlink_mailbox(args, MailFolder::Inbox),
         WinlinkCommand::Outbox(args) => run_winlink_mailbox(args, MailFolder::Outbox),
         WinlinkCommand::Read(args) => {
-            let store_path = resolve_winlink_store_path(args.store, &args.station)?;
-            let store = WinlinkStore::load_or_new(&store_path, &args.station)
+            let station = resolve_station(args.station.as_deref())?;
+            let store_path = resolve_winlink_store_path(args.store, &station)?;
+            let store = WinlinkStore::load_or_new(&store_path, &station)
                 .with_context(|| format!("loading {}", store_path.display()))?;
             let message = store.find_message(&args.message_id)?;
             println!(
@@ -1522,8 +1560,9 @@ fn run_winlink(args: WinlinkArgs) -> Result<()> {
             Ok(())
         }
         WinlinkCommand::Sync(args) => {
-            let store_path = resolve_winlink_store_path(args.store, &args.station)?;
-            let mut store = WinlinkStore::load_or_new(&store_path, &args.station)
+            let station = resolve_station(args.station.as_deref())?;
+            let store_path = resolve_winlink_store_path(args.store, &station)?;
+            let mut store = WinlinkStore::load_or_new(&store_path, &station)
                 .with_context(|| format!("loading {}", store_path.display()))?;
             let transport = WinlinkTransportKind::from(args.transport);
             let report = if transport == WinlinkTransportKind::Fake {
@@ -1533,26 +1572,28 @@ fn run_winlink(args: WinlinkArgs) -> Result<()> {
                     .with_context(|| format!("saving {}", store_path.display()))?;
                 report
             } else if transport == WinlinkTransportKind::Telnet && args.live {
-                let status = telnet_cms_check(TelnetCmsConfig {
-                    station: args.station.clone(),
-                    host: args.host,
-                    port: args.port,
-                    timeout_ms: args.timeout_ms,
-                    live: true,
-                })?;
-                if store.messages_in(MailFolder::Outbox).is_empty() {
+                if args.allow_send && !store.messages_in(MailFolder::Outbox).is_empty() {
                     bail!(
-                        "live Telnet/CMS connectivity succeeded, but full B2F sync is not implemented in this alpha: {}",
-                        serde_json::to_string(&status)?
+                        "live Telnet/CMS sending is not implemented yet; remove --allow-send to run receive-only inbox sync"
                     );
                 }
-                guarded_dry_run_sync_report(
-                    &store,
+                let password = winlink_password_from_env();
+                let report = telnet_cms_receive_sync(
+                    &mut store,
                     Some(store_path.clone()),
-                    transport,
-                    true,
-                    args.allow_send,
-                )?
+                    TelnetCmsConfig {
+                        station: station.clone(),
+                        host: args.host,
+                        port: args.port,
+                        timeout_ms: args.timeout_ms,
+                        live: true,
+                    },
+                    password.as_deref(),
+                )?;
+                store
+                    .save(&store_path)
+                    .with_context(|| format!("saving {}", store_path.display()))?;
+                report
             } else {
                 guarded_dry_run_sync_report(
                     &store,
@@ -1566,8 +1607,9 @@ fn run_winlink(args: WinlinkArgs) -> Result<()> {
             Ok(())
         }
         WinlinkCommand::Telnet(args) => {
+            let station = resolve_station(args.station.as_deref())?;
             let report = telnet_cms_check(TelnetCmsConfig {
-                station: args.station,
+                station,
                 host: args.host,
                 port: args.port,
                 timeout_ms: args.timeout_ms,
@@ -1583,8 +1625,9 @@ fn run_winlink(args: WinlinkArgs) -> Result<()> {
             Ok(())
         }
         WinlinkCommand::Transport(args) => {
+            let station = resolve_station(args.station.as_deref())?;
             let report = transport_plan_report(
-                args.station,
+                station,
                 WinlinkTransportKind::from(args.transport),
                 args.live,
             )?;
@@ -1595,8 +1638,9 @@ fn run_winlink(args: WinlinkArgs) -> Result<()> {
 }
 
 fn run_winlink_mailbox(args: WinlinkMailboxArgs, folder: MailFolder) -> Result<()> {
-    let store_path = resolve_winlink_store_path(args.store, &args.station)?;
-    let store = WinlinkStore::load_or_new(&store_path, &args.station)
+    let station = resolve_station(args.station.as_deref())?;
+    let store_path = resolve_winlink_store_path(args.store, &station)?;
+    let store = WinlinkStore::load_or_new(&store_path, &station)
         .with_context(|| format!("loading {}", store_path.display()))?;
     let messages = store
         .messages_in(folder)
@@ -1631,6 +1675,60 @@ fn run_winlink_mailbox(args: WinlinkMailboxArgs, folder: MailFolder) -> Result<(
 fn resolve_winlink_store_path(path: Option<PathBuf>, station: &str) -> Result<PathBuf> {
     path.map(Ok)
         .unwrap_or_else(|| Ok(default_store_path(station)?))
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+struct LocalSettings {
+    station: Option<String>,
+}
+
+fn resolve_station(explicit: Option<&str>) -> Result<String> {
+    if let Some(station) = explicit.filter(|value| !value.trim().is_empty()) {
+        return Ok(normalize_call(station)?);
+    }
+    if let Some(station) = load_local_settings()?.station {
+        return Ok(normalize_call(&station)?);
+    }
+    Ok(DEFAULT_SAMPLE_STATION.to_owned())
+}
+
+fn load_local_settings() -> Result<LocalSettings> {
+    load_local_settings_from(&default_local_settings_path())
+}
+
+fn load_local_settings_from(path: &Path) -> Result<LocalSettings> {
+    if !path.exists() {
+        return Ok(LocalSettings::default());
+    }
+    let raw = fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+    toml::from_str(&raw).with_context(|| format!("parsing {}", path.display()))
+}
+
+fn save_local_settings_to(path: &Path, settings: &LocalSettings) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
+    }
+    fs::write(path, toml::to_string_pretty(settings)?)
+        .with_context(|| format!("writing {}", path.display()))
+}
+
+fn default_local_settings_path() -> PathBuf {
+    std::env::var_os(LOCAL_SETTINGS_ENV)
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("XDG_CONFIG_HOME")
+                .map(PathBuf::from)
+                .map(|base| base.join("chattybara").join("settings.toml"))
+        })
+        .or_else(|| {
+            std::env::var_os("HOME").map(|home| {
+                PathBuf::from(home)
+                    .join(".config")
+                    .join("chattybara")
+                    .join("settings.toml")
+            })
+        })
+        .unwrap_or_else(|| PathBuf::from(".chattybara-settings.toml"))
 }
 
 fn run_rig(args: RigArgs) -> Result<()> {
