@@ -2,6 +2,13 @@
 
 All notable public release changes are tracked here.
 
+## 0.1.0-alpha.9 - 2026-05-13
+
+- Fixed the live Telnet/CMS B2F handshake to send `;FW:` with the required
+  colon and the local prompt line before traffic.
+- Tightened fake-CMS regression tests so the live handshake transcript matches
+  the reference B2F ordering.
+
 ## 0.1.0-alpha.8 - 2026-05-13
 
 - Added macOS Keychain-backed Winlink password storage via

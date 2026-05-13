@@ -693,13 +693,14 @@ pub fn telnet_cms_receive_sync(
     session.write_line(CMS_TELNET_PASSWORD)?;
 
     let handshake = session.read_remote_handshake()?;
-    session.write_line(&format!(";FW {station}"))?;
+    session.write_line(&format!(";FW: {station}"))?;
     session.write_line(&local_sid_line())?;
     if let Some(challenge) = handshake.secure_challenge.as_deref() {
         let password = password.ok_or(WinlinkError::MissingPasswordEnv(WINLINK_PASSWORD_ENV))?;
         let response = secure_login_response(challenge, password);
         session.write_line(&format!(";PR: {response}"))?;
     }
+    session.write_line(&format!("; CMS DE {station}>"))?;
 
     let mut outbox_sent = 0;
     if allow_send {
@@ -2187,12 +2188,13 @@ mod tests {
             stream
                 .write_all(b"[WL2K-5.0-B2FHM$]\r;PQ: 23753528\rCMS>\r")
                 .expect("write handshake");
-            assert_eq!(read_cr_line(&mut reader), ";FW JA1TST");
+            assert_eq!(read_cr_line(&mut reader), ";FW: JA1TST");
             assert!(
                 read_cr_line(&mut reader).starts_with("[chattybara-"),
                 "local SID"
             );
             assert_eq!(read_cr_line(&mut reader), ";PR: 95074758");
+            assert_eq!(read_cr_line(&mut reader), "; CMS DE JA1TST>");
             assert_eq!(read_cr_line(&mut reader), "FF");
 
             let body = b"Downloaded body from fake CMS.";
@@ -2286,12 +2288,13 @@ mod tests {
             stream
                 .write_all(b"[WL2K-5.0-B2FHM$]\r;PQ: 23753528\rCMS>\r")
                 .expect("write handshake");
-            assert_eq!(read_cr_line(&mut reader), ";FW JA1TST");
+            assert_eq!(read_cr_line(&mut reader), ";FW: JA1TST");
             assert!(
                 read_cr_line(&mut reader).starts_with("[chattybara-"),
                 "local SID"
             );
             assert_eq!(read_cr_line(&mut reader), ";PR: 95074758");
+            assert_eq!(read_cr_line(&mut reader), "; CMS DE JA1TST>");
 
             let proposal = read_cr_line(&mut reader);
             assert!(proposal.starts_with("FC EM JA1TST-0001 "), "{proposal}");

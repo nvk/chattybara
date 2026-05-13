@@ -511,9 +511,10 @@ fn winlink_telnet_live_sync_lists_fake_cms_inbox() {
         stream
             .write_all(b"[WL2K-5.0-B2FHM$]\r;PQ: 23753528\rCMS>\r")
             .expect("write handshake");
-        assert_eq!(read_nonempty_cr_line(&mut reader), ";FW JA1TST");
+        assert_eq!(read_nonempty_cr_line(&mut reader), ";FW: JA1TST");
         assert!(read_nonempty_cr_line(&mut reader).starts_with("[chattybara-"));
         assert_eq!(read_nonempty_cr_line(&mut reader), ";PR: 95074758");
+        assert_eq!(read_nonempty_cr_line(&mut reader), "; CMS DE JA1TST>");
         assert_eq!(read_nonempty_cr_line(&mut reader), "FF");
 
         let body = b"CLI downloaded body.";
