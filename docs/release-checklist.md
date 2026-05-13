@@ -5,7 +5,7 @@ This checklist is for public source releases.
 ## Scope
 
 - Release type: no-hardware chat-client alpha.
-- Current version: `0.1.0-alpha.10`.
+- Current version: `0.1.0-alpha.11`.
 - Product topology: `chattybara` is the TUI/CLI chat client; `orca-*` crates
   are consumed from `https://gitlab.com/yokij/orca`.
 - Public chattybara home: `https://github.com/nvk/chattybara`.
@@ -29,6 +29,7 @@ cargo run -p chattybara-cli -- modem samples "hello chattybara" out/modem-sample
 cargo run -p chattybara-cli -- station modes
 cargo run -p chattybara-cli -- station fake-events --mode js8call --station JA1TST --out out/station-js8/events.jsonl --session-dir out/station-js8/session
 cargo run -p chattybara-cli -- station replay out/station-js8/events.jsonl
+cargo run -p chattybara-cli -- station protocol-suite --station JA1TST --out-dir out/protocol-suite
 cargo run -p chattybara-cli -- station guard --action send-message --arm-tx
 cargo run -p chattybara-cli -- station external --adapter fldigi
 cargo run -p chattybara-cli -- station config --station JA1TST --path out/release-settings.toml
@@ -36,7 +37,7 @@ CHATTYBARA_SETTINGS=out/release-settings.toml cargo run -p chattybara-cli -- win
 CHATTYBARA_SETTINGS=out/release-settings.toml cargo run -p chattybara-cli -- winlink transport --transport vara
 CHATTYBARA_SETTINGS=out/release-settings.toml cargo run -p chattybara-cli -- winlink transport --transport orca
 cargo build --release -p chattybara-cli --locked
-CARGO_HOME=$PWD/.cargo-home scripts/build-release-asset.sh 0.1.0-alpha.10
+CARGO_HOME=$PWD/.cargo-home scripts/build-release-asset.sh 0.1.0-alpha.11
 ```
 
 `cargo package --workspace` is intentionally not a release gate for this alpha.
@@ -84,7 +85,7 @@ Before tagging:
 ## Tag
 
 ```sh
-git tag -a v0.1.0-alpha.10 -m "chattybara 0.1.0-alpha.10"
+git tag -a v0.1.0-alpha.11 -m "chattybara 0.1.0-alpha.11"
 git push origin master --tags
 ```
 

@@ -64,7 +64,7 @@ use radio_profile::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::io::{self, IsTerminal, Read as _};
 use std::path::{Path, PathBuf};
@@ -262,6 +262,7 @@ enum StationCommand {
     Config(StationConfigArgs),
     Modes(StationModesArgs),
     FakeEvents(StationFakeEventsArgs),
+    ProtocolSuite(StationProtocolSuiteArgs),
     Replay(StationReplayArgs),
     Guard(StationGuardArgs),
     External(StationExternalArgs),
@@ -288,6 +289,14 @@ struct StationFakeEventsArgs {
     out: Option<PathBuf>,
     #[arg(long = "session-dir")]
     session_dir: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+struct StationProtocolSuiteArgs {
+    #[arg(long, default_value = "JA1TST")]
+    station: String,
+    #[arg(long = "out-dir")]
+    out_dir: Option<PathBuf>,
 }
 
 #[derive(Debug, Args)]
@@ -337,6 +346,17 @@ enum StationExternalAdapter {
     Wsjtx,
     Fldigi,
     Pskreporter,
+}
+
+impl StationExternalAdapter {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Js8call => "js8call",
+            Self::Wsjtx => "wsjtx",
+            Self::Fldigi => "fldigi",
+            Self::Pskreporter => "pskreporter",
+        }
+    }
 }
 
 #[derive(Debug, Args)]
@@ -1197,6 +1217,75 @@ fn run_station(args: StationArgs) -> Result<()> {
             println!("{}", serde_json::to_string_pretty(&report)?);
             Ok(())
         }
+        StationCommand::ProtocolSuite(args) => {
+            let station = normalize_call(&args.station)?;
+            let modes = station_protocol_suite_modes();
+            let descriptors = built_in_modes()
+                .into_iter()
+                .map(|descriptor| (descriptor.id, descriptor))
+                .collect::<BTreeMap<_, _>>();
+            let mut reports = Vec::new();
+            for mode in modes {
+                let records = fake_events_for_mode(mode, &station)?;
+                let summary = replay_summary(&records);
+                let mode_dir = args.out_dir.as_ref().map(|dir| dir.join(mode.label()));
+                if let Some(dir) = &mode_dir {
+                    fs::create_dir_all(dir)
+                        .with_context(|| format!("creating {}", dir.display()))?;
+                    write_event_log(&dir.join("events.jsonl"), &records)?;
+                    write_json_file(
+                        &dir.join("support.json"),
+                        &json!({
+                            "kind": "station-session-support",
+                            "product": "chattybara",
+                            "mode": mode.label(),
+                            "station": station.clone(),
+                            "descriptor": descriptors.get(&mode),
+                            "summary": summary.clone(),
+                        }),
+                    )?;
+                }
+                let adapter = station_external_adapter_for_mode(mode).map(|adapter| {
+                    station_external_adapter_report(adapter, None, None, false, false)
+                });
+                let transport = match mode {
+                    ModeId::WinlinkVara => Some(serde_json::to_value(transport_plan_report(
+                        &station,
+                        WinlinkTransportKind::Vara,
+                        false,
+                    )?)?),
+                    ModeId::WinlinkOrca => Some(serde_json::to_value(transport_plan_report(
+                        &station,
+                        WinlinkTransportKind::Orca,
+                        false,
+                    )?)?),
+                    _ => None,
+                };
+                reports.push(json!({
+                    "mode": mode.label(),
+                    "descriptor": descriptors.get(&mode),
+                    "event_count": records.len(),
+                    "session_dir": mode_dir,
+                    "summary": summary,
+                    "adapter": adapter,
+                    "transport": transport,
+                }));
+            }
+            let report = json!({
+                "kind": "station-protocol-suite-report",
+                "ok": true,
+                "station": station,
+                "mode_count": reports.len(),
+                "out_dir": args.out_dir,
+                "modes": reports,
+                "notes": [
+                    "fixture and scaffold validation only; no network, audio, radio, TX, or external app connection is opened",
+                    "Winlink VARA and Winlink orca remain planned transports; transport reports are dry-run planning surfaces"
+                ],
+            });
+            println!("{}", serde_json::to_string_pretty(&report)?);
+            Ok(())
+        }
         StationCommand::Replay(args) => {
             let records = read_event_log(&args.events)?;
             let report = json!({
@@ -1224,38 +1313,133 @@ fn run_station(args: StationArgs) -> Result<()> {
             Ok(())
         }
         StationCommand::External(args) => {
-            let (mode, default_host, default_port) = match args.adapter {
-                StationExternalAdapter::Js8call => (ModeId::Js8callExternal, "127.0.0.1", 2242),
-                StationExternalAdapter::Wsjtx => (ModeId::WsjtxExternal, "127.0.0.1", 2237),
-                StationExternalAdapter::Fldigi => (ModeId::FldigiExternal, "127.0.0.1", 7362),
-                StationExternalAdapter::Pskreporter => {
-                    (ModeId::PskReporter, "retrieve.pskreporter.info", 443)
-                }
-            };
-            let tx_enabled = args.enable_tx;
-            let reporting_enabled = args.enable_reporting;
-            let report = json!({
-                "kind": "station-external-adapter-scaffold",
-                "ok": true,
-                "mode": mode.label(),
-                "endpoint": {
-                    "host": args.host.unwrap_or_else(|| default_host.to_owned()),
-                    "port": args.port.unwrap_or(default_port),
-                },
-                "receive_only": !tx_enabled && !reporting_enabled,
-                "tx_enabled": tx_enabled,
-                "reporting_enabled": reporting_enabled,
-                "safety": {
-                    "default": "DRY RUN",
-                    "requires_explicit_arming": true,
-                    "opens_network_connection": false,
-                    "note": "scaffold only; live external app connections are implemented behind later opt-in adapters"
-                }
-            });
+            let report = station_external_adapter_report(
+                args.adapter,
+                args.host,
+                args.port,
+                args.enable_tx,
+                args.enable_reporting,
+            );
             println!("{}", serde_json::to_string_pretty(&report)?);
             Ok(())
         }
     }
+}
+
+fn station_protocol_suite_modes() -> [ModeId; 7] {
+    [
+        ModeId::Js8callExternal,
+        ModeId::WsjtxExternal,
+        ModeId::FldigiExternal,
+        ModeId::CwAssist,
+        ModeId::PskReporter,
+        ModeId::WinlinkVara,
+        ModeId::WinlinkOrca,
+    ]
+}
+
+fn station_external_adapter_for_mode(mode: ModeId) -> Option<StationExternalAdapter> {
+    match mode {
+        ModeId::Js8callExternal => Some(StationExternalAdapter::Js8call),
+        ModeId::WsjtxExternal => Some(StationExternalAdapter::Wsjtx),
+        ModeId::FldigiExternal => Some(StationExternalAdapter::Fldigi),
+        ModeId::PskReporter => Some(StationExternalAdapter::Pskreporter),
+        _ => None,
+    }
+}
+
+fn station_external_adapter_plan(
+    adapter: StationExternalAdapter,
+) -> (
+    ModeId,
+    &'static str,
+    u16,
+    &'static str,
+    &'static str,
+    Vec<&'static str>,
+) {
+    match adapter {
+        StationExternalAdapter::Js8call => (
+            ModeId::Js8callExternal,
+            "127.0.0.1",
+            2442,
+            "tcp-json-lines",
+            "JS8Call API",
+            vec![
+                "expects newline-delimited JSON messages",
+                "safe scaffold does not connect until a live adapter is added",
+            ],
+        ),
+        StationExternalAdapter::Wsjtx => (
+            ModeId::WsjtxExternal,
+            "127.0.0.1",
+            2237,
+            "udp-datagrams",
+            "WSJT-X UDP reporting",
+            vec![
+                "used for FT8/FT4 decode and logging status packets",
+                "requires clock discipline for live weak-signal operation",
+            ],
+        ),
+        StationExternalAdapter::Fldigi => (
+            ModeId::FldigiExternal,
+            "127.0.0.1",
+            7362,
+            "xml-rpc-http",
+            "fldigi XML-RPC",
+            vec![
+                "intended for RX text, mode state, macro, and guarded TX control",
+                "safe scaffold does not call XML-RPC methods",
+            ],
+        ),
+        StationExternalAdapter::Pskreporter => (
+            ModeId::PskReporter,
+            "retrieve.pskreporter.info",
+            443,
+            "https-query",
+            "PSK Reporter query API",
+            vec![
+                "receive-only spot retrieval scaffold",
+                "external reporting remains disabled unless explicitly enabled",
+            ],
+        ),
+    }
+}
+
+fn station_external_adapter_report(
+    adapter: StationExternalAdapter,
+    host: Option<String>,
+    port: Option<u16>,
+    tx_enabled: bool,
+    reporting_enabled: bool,
+) -> Value {
+    let (mode, default_host, default_port, protocol, protocol_label, notes) =
+        station_external_adapter_plan(adapter);
+    json!({
+        "kind": "station-external-adapter-scaffold",
+        "ok": true,
+        "mode": mode.label(),
+        "adapter": adapter.label(),
+        "protocol": {
+            "kind": protocol,
+            "label": protocol_label,
+            "live_status": "scaffold",
+            "notes": notes,
+        },
+        "endpoint": {
+            "host": host.unwrap_or_else(|| default_host.to_owned()),
+            "port": port.unwrap_or(default_port),
+        },
+        "receive_only": !tx_enabled && !reporting_enabled,
+        "tx_enabled": tx_enabled,
+        "reporting_enabled": reporting_enabled,
+        "safety": {
+            "default": "DRY RUN",
+            "requires_explicit_arming": true,
+            "opens_network_connection": false,
+            "note": "scaffold only; live external app connections are implemented behind later opt-in adapters"
+        }
+    })
 }
 
 fn run_chat(args: ChatArgs) -> Result<()> {

@@ -2,6 +2,14 @@
 
 All notable public release changes are tracked here.
 
+## 0.1.0-alpha.11 - 2026-05-13
+
+- Added `chattybara station protocol-suite` to validate the JS8Call, WSJT-X/FT8,
+  fldigi, CW assist, PSK Reporter, Winlink-VARA, and Winlink-orca scaffold
+  surfaces in one no-hardware run.
+- Enriched external adapter scaffold reports with protocol metadata and fixed
+  the JS8Call API default endpoint to `127.0.0.1:2442`.
+
 ## 0.1.0-alpha.10 - 2026-05-13
 
 - Fixed Winlink station resolution so `chattybara winlink ...` commands without

@@ -33,6 +33,23 @@ chattybara station fake-events --mode js8call --station JA1TST --out out/js8/eve
 chattybara station replay out/js8/events.jsonl
 ```
 
+Run the planned protocol scaffold suite:
+
+```sh
+chattybara station protocol-suite --station JA1TST --out-dir out/protocol-suite
+```
+
+This writes replayable fixture sessions for:
+
+- `js8call-external`: TCP JSON-lines API scaffold, default `127.0.0.1:2442`.
+- `wsjtx-external`: WSJT-X/FT8 UDP reporting scaffold, default
+  `127.0.0.1:2237`.
+- `fldigi-external`: XML-RPC scaffold, default `127.0.0.1:7362`.
+- `cw-assist`: receive-only Morse decode fixture.
+- `pskreporter`: receive-only HTTPS query scaffold.
+- `winlink-vara`: transport-status scaffold for future external VARA sync.
+- `winlink-orca`: transport-status scaffold for future native orca sync.
+
 Check safety gates:
 
 ```sh

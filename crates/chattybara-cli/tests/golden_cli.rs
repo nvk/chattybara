@@ -699,6 +699,83 @@ fn station_fake_events_write_replayable_session() {
 }
 
 #[test]
+fn station_protocol_suite_covers_external_and_planned_modes() {
+    let dir = tempdir().expect("tempdir");
+    let out_dir = dir.path().join("protocol-suite");
+
+    let report = run_json(&[
+        "station",
+        "protocol-suite",
+        "--station",
+        "ja1tst",
+        "--out-dir",
+        &path_arg(&out_dir),
+    ]);
+
+    assert_eq!(report["kind"], "station-protocol-suite-report");
+    assert_eq!(report["ok"], true);
+    assert_eq!(report["mode_count"], 7);
+    let modes = report["modes"].as_array().expect("modes");
+    for mode in [
+        "js8call-external",
+        "wsjtx-external",
+        "fldigi-external",
+        "cw-assist",
+        "pskreporter",
+        "winlink-vara",
+        "winlink-orca",
+    ] {
+        assert!(
+            modes.iter().any(|entry| entry["mode"] == mode),
+            "missing {mode}"
+        );
+        assert!(out_dir.join(mode).join("events.jsonl").exists());
+        assert!(out_dir.join(mode).join("support.json").exists());
+    }
+
+    let by_mode = |mode: &str| {
+        modes
+            .iter()
+            .find(|entry| entry["mode"] == mode)
+            .unwrap_or_else(|| panic!("missing mode {mode}"))
+    };
+    let js8call = by_mode("js8call-external");
+    assert_eq!(js8call["adapter"]["endpoint"]["port"], 2442);
+    assert_eq!(js8call["adapter"]["protocol"]["kind"], "tcp-json-lines");
+
+    let wsjtx = by_mode("wsjtx-external");
+    assert_eq!(wsjtx["adapter"]["endpoint"]["port"], 2237);
+    assert_eq!(wsjtx["adapter"]["protocol"]["kind"], "udp-datagrams");
+
+    let fldigi = by_mode("fldigi-external");
+    assert_eq!(fldigi["adapter"]["endpoint"]["port"], 7362);
+    assert_eq!(fldigi["adapter"]["protocol"]["kind"], "xml-rpc-http");
+
+    let cw = by_mode("cw-assist");
+    assert!(cw["adapter"].is_null());
+    assert_eq!(cw["descriptor"]["capabilities"]["rx_only"], true);
+
+    let psk = by_mode("pskreporter");
+    assert_eq!(psk["adapter"]["protocol"]["kind"], "https-query");
+    assert_eq!(psk["summary"]["event_counts"]["spot"], 1);
+
+    let vara = by_mode("winlink-vara");
+    assert_eq!(vara["transport"]["transport"], "vara");
+    assert_eq!(vara["transport"]["dry_run"], true);
+
+    let orca = by_mode("winlink-orca");
+    assert_eq!(orca["transport"]["transport"], "orca");
+    assert_eq!(orca["transport"]["dry_run"], true);
+
+    let replay = run_json(&[
+        "station",
+        "replay",
+        &path_arg(&out_dir.join("pskreporter").join("events.jsonl")),
+    ]);
+    assert_eq!(replay["summary"]["modes"]["pskreporter"], 2);
+}
+
+#[test]
 fn station_guard_blocks_unarmed_transmit_and_reporting() {
     let send = run_json_failure(&["station", "guard", "--action", "send-message"]);
     assert_eq!(send["kind"], "station-action-guard-report");
@@ -745,9 +822,14 @@ fn station_external_scaffolds_are_receive_only_by_default() {
     assert_eq!(report["mode"], "fldigi-external");
     assert_eq!(report["receive_only"], true);
     assert_eq!(report["tx_enabled"], false);
+    assert_eq!(report["protocol"]["kind"], "xml-rpc-http");
     assert_eq!(report["endpoint"]["host"], "127.0.0.1");
     assert_eq!(report["endpoint"]["port"], 7362);
     assert_eq!(report["safety"]["requires_explicit_arming"], true);
+
+    let js8call = run_json(&["station", "external", "--adapter", "js8call"]);
+    assert_eq!(js8call["endpoint"]["port"], 2442);
+    assert_eq!(js8call["protocol"]["kind"], "tcp-json-lines");
 }
 
 #[test]
