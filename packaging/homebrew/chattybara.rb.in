@@ -19,5 +19,10 @@ class Chattybara < Formula
     system "#{bin}/chattybara", "--help"
     output = shell_output("#{bin}/chattybara modem roundtrip \"hello chattybara\"")
     assert_match '"ok": true', output
+    settings = testpath/"settings.toml"
+    system "#{bin}/chattybara", "station", "config", "--station", "JA1TST", "--path", settings
+    ENV["CHATTYBARA_SETTINGS"] = settings.to_s
+    output = shell_output("#{bin}/chattybara winlink telnet --check")
+    assert_match '"transport": "telnet-cms"', output
   end
 end
