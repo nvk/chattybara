@@ -1572,11 +1572,6 @@ fn run_winlink(args: WinlinkArgs) -> Result<()> {
                     .with_context(|| format!("saving {}", store_path.display()))?;
                 report
             } else if transport == WinlinkTransportKind::Telnet && args.live {
-                if args.allow_send && !store.messages_in(MailFolder::Outbox).is_empty() {
-                    bail!(
-                        "live Telnet/CMS sending is not implemented yet; remove --allow-send to run receive-only inbox sync"
-                    );
-                }
                 let password = winlink_password_from_env();
                 let report = telnet_cms_receive_sync(
                     &mut store,
@@ -1589,6 +1584,7 @@ fn run_winlink(args: WinlinkArgs) -> Result<()> {
                         live: true,
                     },
                     password.as_deref(),
+                    args.allow_send,
                 )?;
                 store
                     .save(&store_path)

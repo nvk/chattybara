@@ -20,9 +20,10 @@ current release is meant for no-radio testing and operator workflow build-out.
 
 ## What Is Guarded
 
-Full live Winlink message exchange is not enabled yet. Telnet/CMS live sync is
-receive-only and metadata-only: message bodies, attachments, and live sending
-remain guarded. VARA and orca live sync report planned transport status until
+Telnet/CMS live sync can download supported `FC` and `FD` inbound B2F messages,
+save bodies into the local mailbox, and save received attachments beside the
+store. Live Telnet/CMS sending is implemented only behind explicit
+`--allow-send`. VARA and orca live sync report planned transport status until
 their session layers are implemented.
 
 Do not pass a Winlink password on the command line. The account profile records
@@ -100,10 +101,10 @@ The live check opens TCP to the configured CMS endpoint and reads an initial
 greeting if one is available. It does not authenticate, upload, download, or
 send a password.
 
-## Live Telnet/CMS Inbox Metadata
+## Live Telnet/CMS Sync
 
-This logs into the CMS and lists pending inbox proposals without downloading or
-clearing message bodies:
+This logs into the CMS, downloads supported pending inbox messages, and updates
+the local store:
 
 ```sh
 chattybara winlink sync \
@@ -114,8 +115,25 @@ chattybara winlink inbox
 chattybara winlink read MESSAGE-ID
 ```
 
-The saved inbox entries are metadata placeholders. `last_error` is set to
-`payload deferred; body not downloaded` by design.
+Received attachments are saved under:
+
+```text
+<store-directory>/attachments/<message-id>/
+```
+
+Live sending remains operator-gated:
+
+```sh
+chattybara winlink compose \
+  --to JA1QSO \
+  --subject "test" \
+  --body "hello"
+
+chattybara winlink sync \
+  --transport telnet \
+  --live \
+  --allow-send
+```
 
 ## VARA And Orca Transport Plan
 
@@ -134,14 +152,14 @@ chattybara winlink transport --transport orca
 The mailbox store, outbox, attachments, B2F message model, and safety gates live
 in chattybara. Packet, audio, link, and modem mechanics belong in orca.
 
-## Release Gates For Full Live Sync
+## Remaining Live Sync Gates
 
-Before full live Winlink sync is enabled:
+Before the non-Telnet transports are enabled:
 
 - fake sync must stay deterministic and covered by tests.
 - B2F parser/serializer coverage must include message proposals, payload
   checksums, compression, attachments, accepts/rejects, aborts, reconnects, and
-  safe metadata-only deferrals.
+  safe deferrals.
 - credentials must use keychain/env sources, never command-line flags or logs.
 - live send must require explicit `--live --allow-send`.
 - Telnet/CMS, VARA, and orca transports must share the same store and reporting

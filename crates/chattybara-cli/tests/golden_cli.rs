@@ -516,17 +516,23 @@ fn winlink_telnet_live_sync_lists_fake_cms_inbox() {
         assert_eq!(read_nonempty_cr_line(&mut reader), ";PR: 95074758");
         assert_eq!(read_nonempty_cr_line(&mut reader), "FF");
 
-        let proposal = "FC EM CLI-MID-1 256 128 0".to_owned();
+        let body = b"CLI downloaded body.";
+        let payload = b2_fixture_message("CLI-MID-1", "JA1QSO", "JA1TST", "CLI subject", body);
+        let compressed = b2_lzhuf_fixture_payload(&payload);
+        let transfer = b2_transfer_fixture("CLI subject", &compressed);
+        let proposal = format!("FC EM CLI-MID-1 {} {} 0", payload.len(), compressed.len());
         let checksum = b2f_checksum(std::slice::from_ref(&proposal));
         stream
             .write_all(
                 format!(
-                    ";PM: JA1TST CLI-MID-1 256 JA1QSO CLI subject\r{proposal}\rF> {checksum:02X}\r"
+                    ";PM: JA1TST CLI-MID-1 {} JA1QSO CLI subject\r{proposal}\rF> {checksum:02X}\r",
+                    payload.len()
                 )
                 .as_bytes(),
             )
             .expect("write proposals");
-        assert_eq!(read_nonempty_cr_line(&mut reader), "FS =");
+        assert_eq!(read_nonempty_cr_line(&mut reader), "FS +");
+        stream.write_all(&transfer).expect("write transfer");
         assert_eq!(read_nonempty_cr_line(&mut reader), "FQ");
     });
 
@@ -587,12 +593,8 @@ fn winlink_telnet_live_sync_lists_fake_cms_inbox() {
         &store_arg,
     ]);
     assert_eq!(message["message"]["from"], "JA1QSO@winlink.org");
-    assert!(
-        message["message"]["body"]
-            .as_str()
-            .expect("body")
-            .contains("deferred the payload")
-    );
+    assert_eq!(message["message"]["body"], "CLI downloaded body.");
+    assert_eq!(message["message"]["last_error"], Value::Null);
 }
 
 #[test]
@@ -2319,4 +2321,74 @@ fn b2f_checksum(lines: &[String]) -> u8 {
         sum += i64::from(b'\r');
     }
     ((-sum) & 0xff) as u8
+}
+
+fn b2_fixture_message(mid: &str, from: &str, to: &str, subject: &str, body: &[u8]) -> Vec<u8> {
+    let mut payload = Vec::new();
+    write!(
+        &mut payload,
+        "Mid: {mid}\r\nDate: 2026/05/13 10:00\r\nType: Private\r\nFrom: {from}\r\nTo: {to}\r\nSubject: {subject}\r\nMbo: {from}\r\nBody: {}\r\n\r\n",
+        body.len()
+    )
+    .expect("write b2 fixture");
+    payload.extend_from_slice(body);
+    payload
+}
+
+fn b2_lzhuf_fixture_payload(payload: &[u8]) -> Vec<u8> {
+    let compressed = retrocompressor::lzss_huff::compress_slice(
+        payload,
+        &retrocompressor::lzss_huff::STD_OPTIONS,
+    )
+    .expect("compress b2 fixture");
+    let crc = b2_crc16(&compressed);
+    let mut out = Vec::with_capacity(compressed.len() + 2);
+    out.extend_from_slice(&crc.to_le_bytes());
+    out.extend_from_slice(&compressed);
+    out
+}
+
+fn b2_transfer_fixture(title: &str, compressed: &[u8]) -> Vec<u8> {
+    let mut transfer = Vec::new();
+    let mut header = Vec::new();
+    header.extend_from_slice(title.as_bytes());
+    header.push(0);
+    header.extend_from_slice(b"0");
+    header.push(0);
+    transfer.push(0x01);
+    transfer.push(header.len() as u8);
+    transfer.extend_from_slice(&header);
+    let mut checksum = 0_u16;
+    for chunk in compressed.chunks(250) {
+        transfer.push(0x02);
+        transfer.push(chunk.len() as u8);
+        for byte in chunk {
+            checksum = (checksum + u16::from(*byte)) & 0xff;
+        }
+        transfer.extend_from_slice(chunk);
+    }
+    transfer.push(0x04);
+    transfer.push((0_u16.wrapping_sub(checksum) & 0xff) as u8);
+    transfer
+}
+
+fn b2_crc16(payload: &[u8]) -> u16 {
+    let mut sum = 0_u16;
+    for byte in payload.iter().copied().chain([0, 0]) {
+        let table = crc16_ccitt_table_value((sum >> 8) as u8);
+        sum = ((sum << 8) & 0xff00) ^ table ^ u16::from(byte);
+    }
+    sum
+}
+
+fn crc16_ccitt_table_value(index: u8) -> u16 {
+    let mut value = u16::from(index) << 8;
+    for _ in 0..8 {
+        if (value & 0x8000) != 0 {
+            value = (value << 1) ^ 0x1021;
+        } else {
+            value <<= 1;
+        }
+    }
+    value
 }

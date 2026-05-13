@@ -8,7 +8,7 @@ members = [
 resolver = "3"
 
 [workspace.package]
-version = "0.1.0-alpha.6"
+version = "0.1.0-alpha.7"
 edition = "2024"
 rust-version = "1.95"
 authors = ["nvk"]
@@ -26,7 +26,11 @@ anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 crossterm = "0.28"
 cpal = "0.17.3"
+base64 = "0.22"
+flate2 = "1"
+quoted_printable = "0.5"
 ratatui = { version = "0.29", default-features = false, features = ["crossterm"] }
+retrocompressor = "1.0.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serialport = "4.9.0"

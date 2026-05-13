@@ -13,7 +13,7 @@ modem lab material.
 
 ## Status
 
-Current release: `0.1.0-alpha.6`.
+Current release: `0.1.0-alpha.7`.
 
 This is a public alpha for no-hardware chat-client development. It is useful
 for TUI workflow testing, local peer/node sessions, mailbox and file-offer
@@ -39,8 +39,8 @@ Included:
   operator-console workspaces.
 - Early Winlink mailbox workflow: local account/store, compose/read/list,
   deterministic fake sync, B2F proposal modeling, Telnet/CMS dry-run checks,
-  receive-only live inbox metadata sync, and guarded VARA/orca transport
-  status surfaces.
+  live Telnet/CMS message receive, guarded live Telnet/CMS sending, and
+  guarded VARA/orca transport status surfaces.
 - Local format, clippy, tests, and no-hardware lab checks.
 
 Not included:
@@ -50,7 +50,7 @@ Not included:
   traffic, hosted CI, or live serial/audio access.
 - Protocol-specific compatibility claims. Those belong in backend-specific
   projects and documented release notes.
-- Full Winlink body download, attachment download, and live sending.
+- VARA/orca Winlink session transports.
 
 ## Repositories
 

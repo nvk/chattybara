@@ -2,6 +2,17 @@
 
 All notable public release changes are tracked here.
 
+## 0.1.0-alpha.7 - 2026-05-13
+
+- Added live Telnet/CMS B2F payload download for supported inbound `FC` and
+  `FD` proposals.
+- Added B2F binary block checksum validation, B2 LZHUF CRC validation, LZHUF
+  and gzip decompression, message header/body parsing, and received attachment
+  saving.
+- Added guarded live Telnet/CMS outbox sending behind explicit `--allow-send`.
+- Existing metadata placeholders are replaced with downloaded messages when
+  the same message ID is received later.
+
 ## 0.1.0-alpha.6 - 2026-05-13
 
 - Fixed live Telnet/CMS sync prompt handling by consuming full CR-terminated
