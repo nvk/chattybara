@@ -5,7 +5,7 @@ This checklist is for public source releases.
 ## Scope
 
 - Release type: no-hardware chat-client alpha.
-- Current version: `0.1.0-alpha.2`.
+- Current version: `0.1.0-alpha.3`.
 - Product topology: `chattybara` is the TUI/CLI chat client; `orca-*` crates
   are consumed from `https://gitlab.com/yokij/orca`.
 - Public chattybara home: `https://github.com/nvk/chattybara`.
@@ -31,8 +31,11 @@ cargo run -p chattybara-cli -- station fake-events --mode js8call --station JA1T
 cargo run -p chattybara-cli -- station replay out/station-js8/events.jsonl
 cargo run -p chattybara-cli -- station guard --action send-message --arm-tx
 cargo run -p chattybara-cli -- station external --adapter fldigi
+cargo run -p chattybara-cli -- winlink telnet --station JA1TST --check
+cargo run -p chattybara-cli -- winlink transport --station JA1TST --transport vara
+cargo run -p chattybara-cli -- winlink transport --station JA1TST --transport orca
 cargo build --release -p chattybara-cli --locked
-CARGO_HOME=$PWD/.cargo-home scripts/build-release-asset.sh 0.1.0-alpha.2
+CARGO_HOME=$PWD/.cargo-home scripts/build-release-asset.sh 0.1.0-alpha.3
 ```
 
 `cargo package --workspace` is intentionally not a release gate for this alpha.
@@ -46,6 +49,7 @@ out/install-smoke/bin/chattybara --help
 out/install-smoke/bin/chattybara chat tui --setup-preview
 out/install-smoke/bin/chattybara modem roundtrip "hello chattybara"
 out/install-smoke/bin/chattybara simulate app-link --payload-bytes 180 --drop-first-attempt --duplicate-deliveries
+out/install-smoke/bin/chattybara winlink telnet --station JA1TST --check
 ```
 
 Run standalone orca release checks in `https://gitlab.com/yokij/orca`.
@@ -77,7 +81,7 @@ Before tagging:
 ## Tag
 
 ```sh
-git tag -a v0.1.0-alpha.2 -m "chattybara 0.1.0-alpha.2"
+git tag -a v0.1.0-alpha.3 -m "chattybara 0.1.0-alpha.3"
 git push origin master --tags
 ```
 

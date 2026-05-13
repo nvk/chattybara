@@ -74,12 +74,13 @@ The current TUI accepts:
 /workspace cw-assist
 /workspace spots
 /workspace operator-console
+/workspace winlink
 /workspace rig-setup
 ```
 
 The workspace command is scaffolded so the UI can evolve without changing the
-user entry point. `/workspace winlink` is planned with the Winlink mailbox
-adapter work.
+user entry point. `/workspace winlink` is accepted and currently points at the
+Winlink mailbox command workflow described in `docs/winlink.md`.
 
 ## Safety
 

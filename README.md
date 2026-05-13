@@ -13,7 +13,7 @@ modem lab material.
 
 ## Status
 
-Current release: `0.1.0-alpha.2`.
+Current release: `0.1.0-alpha.3`.
 
 This is a public alpha for no-hardware chat-client development. It is useful
 for TUI workflow testing, local peer/node sessions, mailbox and file-offer
@@ -37,6 +37,9 @@ Included:
 - Generic Hamlib `rigctld` CAT/PTT client and reusable radio/audio profiles.
 - Station mode registry for future chat, weak-signal, CW, spot-monitor, and
   operator-console workspaces.
+- Early Winlink mailbox workflow: local account/store, compose/read/list,
+  deterministic fake sync, B2F proposal modeling, Telnet/CMS dry-run checks,
+  and guarded VARA/orca transport status surfaces.
 - Local format, clippy, tests, and no-hardware lab checks.
 
 Not included:
@@ -119,6 +122,9 @@ cargo run -p chattybara-cli -- chat tui
   radio setup and guarded live control.
 - `chattybara station modes`, `fake-events`, `replay`, `guard`, and `external`
   expose the station-core registry and safety gates for future modes.
+- `chattybara winlink account`, `compose`, `inbox`, `outbox`, `read`, `sync`,
+  `telnet`, and `transport` expose the no-radio Winlink mailbox workflow and
+  guarded Telnet/CMS, VARA, and orca transport surfaces.
 - `chattybara lab run`, `snapshot`, and `compare` run no-hardware release
   checks.
 

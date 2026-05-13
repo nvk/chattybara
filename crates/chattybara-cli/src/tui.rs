@@ -1347,7 +1347,7 @@ impl ChatTuiApp {
                         "/save-log PATH",
                         "/save-artifacts PATH",
                         "/save-session DIR",
-                        "/workspace chat|weak-signal|cw-assist|spots|operator-console|rig-setup",
+                        "/workspace chat|weak-signal|cw-assist|spots|operator-console|winlink|rig-setup",
                         "/quit",
                     ]
                     .into_iter()
@@ -2322,9 +2322,10 @@ fn parse_workspace_label(value: &str, verb: &str) -> Result<WorkspaceId> {
         "operator-console" | "operator_console" | "console" | "fldigi" => {
             Ok(WorkspaceId::OperatorConsole)
         }
+        "winlink" | "wl2k" | "mailbox" => Ok(WorkspaceId::Winlink),
         "rig-setup" | "rig_setup" | "setup" | "radio" => Ok(WorkspaceId::RigSetup),
         _ => bail!(
-            "invalid workspace for /{verb}: expected chat, weak-signal, cw-assist, spots, operator-console, or rig-setup"
+            "invalid workspace for /{verb}: expected chat, weak-signal, cw-assist, spots, operator-console, winlink, or rig-setup"
         ),
     }
 }
@@ -2751,6 +2752,10 @@ mod tests {
         assert_eq!(
             parse_tui_command("/workspace weak-signal").unwrap(),
             TuiCommand::Workspace(WorkspaceId::WeakSignal)
+        );
+        assert_eq!(
+            parse_tui_command("/workspace winlink").unwrap(),
+            TuiCommand::Workspace(WorkspaceId::Winlink)
         );
         assert!(parse_tui_command("/unknown").is_err());
     }

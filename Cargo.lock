@@ -172,7 +172,7 @@ checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
 
 [[package]]
 name = "chattybara-chat"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 dependencies = [
  "serde",
  "thiserror 2.0.18",
@@ -180,11 +180,12 @@ dependencies = [
 
 [[package]]
 name = "chattybara-cli"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 dependencies = [
  "anyhow",
  "chattybara-chat",
  "chattybara-station",
+ "chattybara-winlink",
  "clap",
  "cpal",
  "crossterm",
@@ -206,10 +207,21 @@ dependencies = [
 
 [[package]]
 name = "chattybara-station"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 dependencies = [
  "serde",
  "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "chattybara-winlink"
+version = "0.1.0-alpha.3"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
  "thiserror 2.0.18",
 ]
 

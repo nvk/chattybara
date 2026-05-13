@@ -2,6 +2,16 @@
 
 All notable public release changes are tracked here.
 
+## 0.1.0-alpha.3 - 2026-05-13
+
+- Added an early transport-neutral Winlink mailbox crate and CLI workflow.
+- Added local Winlink account/store setup, compose/read/list, fake sync, and
+  B2F proposal reporting for no-radio testing.
+- Added guarded Telnet/CMS dry-run connectivity checks plus VARA and orca
+  transport status surfaces.
+- Added Winlink mode registry entries and `/workspace winlink` TUI workspace
+  selection.
+
 ## 0.1.0-alpha.2 - 2026-05-12
 
 - Fixed the TUI top status bar so `/station CALL` immediately shows the pending

@@ -35,6 +35,7 @@ pub enum WorkspaceId {
     CwAssist,
     Spots,
     OperatorConsole,
+    Winlink,
     RigSetup,
 }
 
@@ -46,6 +47,7 @@ impl WorkspaceId {
             Self::CwAssist => "cw-assist",
             Self::Spots => "spots",
             Self::OperatorConsole => "operator-console",
+            Self::Winlink => "winlink",
             Self::RigSetup => "rig-setup",
         }
     }
@@ -55,6 +57,9 @@ impl WorkspaceId {
 #[serde(rename_all = "kebab-case")]
 pub enum ModeId {
     OrcaChat,
+    WinlinkTelnet,
+    WinlinkVara,
+    WinlinkOrca,
     Js8callExternal,
     WsjtxExternal,
     FldigiExternal,
@@ -66,6 +71,9 @@ impl ModeId {
     pub fn label(self) -> &'static str {
         match self {
             Self::OrcaChat => "orca-chat",
+            Self::WinlinkTelnet => "winlink-telnet",
+            Self::WinlinkVara => "winlink-vara",
+            Self::WinlinkOrca => "winlink-orca",
             Self::Js8callExternal => "js8call-external",
             Self::WsjtxExternal => "wsjtx-external",
             Self::FldigiExternal => "fldigi-external",
@@ -77,6 +85,9 @@ impl ModeId {
     pub fn parse(value: &str) -> Option<Self> {
         match value {
             "orca-chat" | "chat" => Some(Self::OrcaChat),
+            "winlink-telnet" | "winlink-cms" | "winlink" => Some(Self::WinlinkTelnet),
+            "winlink-vara" | "vara-winlink" => Some(Self::WinlinkVara),
+            "winlink-orca" | "orca-winlink" => Some(Self::WinlinkOrca),
             "js8call-external" | "js8call" => Some(Self::Js8callExternal),
             "wsjtx-external" | "wsjtx" | "ft8" => Some(Self::WsjtxExternal),
             "fldigi-external" | "fldigi" => Some(Self::FldigiExternal),
@@ -444,6 +455,55 @@ pub fn built_in_modes() -> Vec<ModeDescriptor> {
             },
         },
         ModeDescriptor {
+            id: ModeId::WinlinkTelnet,
+            label: ModeId::WinlinkTelnet.label().to_owned(),
+            workspace: WorkspaceId::Winlink,
+            implementation: ModeImplementation::Native,
+            status: ModeStatus::Scaffold,
+            capabilities: ModeCapabilities {
+                mailbox: true,
+                store_forward: true,
+                file_transfer: true,
+                logging: true,
+                tx_capable: true,
+                ..ModeCapabilities::default()
+            },
+        },
+        ModeDescriptor {
+            id: ModeId::WinlinkVara,
+            label: ModeId::WinlinkVara.label().to_owned(),
+            workspace: WorkspaceId::Winlink,
+            implementation: ModeImplementation::ExternalApp,
+            status: ModeStatus::Planned,
+            capabilities: ModeCapabilities {
+                arq: true,
+                mailbox: true,
+                store_forward: true,
+                file_transfer: true,
+                logging: true,
+                external_app_api: true,
+                tx_capable: true,
+                ..ModeCapabilities::default()
+            },
+        },
+        ModeDescriptor {
+            id: ModeId::WinlinkOrca,
+            label: ModeId::WinlinkOrca.label().to_owned(),
+            workspace: WorkspaceId::Winlink,
+            implementation: ModeImplementation::Native,
+            status: ModeStatus::Planned,
+            capabilities: ModeCapabilities {
+                arq: true,
+                mailbox: true,
+                store_forward: true,
+                file_transfer: true,
+                logging: true,
+                native_modem: true,
+                tx_capable: true,
+                ..ModeCapabilities::default()
+            },
+        },
+        ModeDescriptor {
             id: ModeId::Js8callExternal,
             label: ModeId::Js8callExternal.label().to_owned(),
             workspace: WorkspaceId::Chat,
@@ -603,6 +663,35 @@ pub fn fake_events_for_mode(mode: ModeId, station: &str) -> StationResult<Vec<St
                     .to_owned(),
             }),
         ],
+        ModeId::WinlinkTelnet => vec![
+            StationEvent::AdapterHealth(AdapterHealthEvent {
+                mode,
+                ok: true,
+                message: "Winlink Telnet/CMS mailbox scaffold ready; fake sync available"
+                    .to_owned(),
+                receive_only: false,
+            }),
+            StationEvent::MailMessage(MailMessageEvent {
+                mode,
+                message_id: "winlink-001".to_owned(),
+                from: "JA1QSO@winlink.org".to_owned(),
+                to: format!("{station}@winlink.org"),
+                subject: "Winlink fixture message".to_owned(),
+                body: "No-radio Winlink mailbox fixture".to_owned(),
+            }),
+        ],
+        ModeId::WinlinkVara => vec![StationEvent::AdapterHealth(AdapterHealthEvent {
+            mode,
+            ok: true,
+            message: "Winlink over external VARA is planned; live TX disabled".to_owned(),
+            receive_only: true,
+        })],
+        ModeId::WinlinkOrca => vec![StationEvent::AdapterHealth(AdapterHealthEvent {
+            mode,
+            ok: true,
+            message: "Winlink over orca is planned as an experimental open transport".to_owned(),
+            receive_only: true,
+        })],
         ModeId::Js8callExternal => vec![
             StationEvent::AdapterHealth(AdapterHealthEvent {
                 mode,
@@ -783,12 +872,18 @@ mod tests {
     #[test]
     fn modes_cover_planned_workspaces() {
         let modes = built_in_modes();
-        assert_eq!(modes.len(), 6);
+        assert_eq!(modes.len(), 9);
         assert!(modes.iter().any(|mode| mode.id == ModeId::OrcaChat));
+        assert!(modes.iter().any(|mode| mode.id == ModeId::WinlinkTelnet));
         assert!(
             modes
                 .iter()
                 .any(|mode| mode.workspace == WorkspaceId::WeakSignal)
+        );
+        assert!(
+            modes
+                .iter()
+                .any(|mode| mode.workspace == WorkspaceId::Winlink)
         );
         assert!(modes.iter().any(|mode| mode.capabilities.spot_reporting));
     }

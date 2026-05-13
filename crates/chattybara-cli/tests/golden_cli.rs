@@ -307,12 +307,186 @@ fn chat_tui_backend_typo_reports_no_space_hint() {
 }
 
 #[test]
+fn winlink_fake_sync_exercises_mail_store_without_radio() {
+    let dir = tempdir().expect("tempdir");
+    let store = dir.path().join("winlink-store.json");
+    let store_arg = path_arg(&store);
+
+    let account = run_json(&[
+        "winlink",
+        "account",
+        "setup",
+        "--station",
+        "ve3tst",
+        "--store",
+        &store_arg,
+        "--password-source",
+        "env",
+    ]);
+    assert_eq!(account["kind"], "winlink-account-setup-report");
+    assert_eq!(account["station"], "VE3TST");
+    assert_eq!(account["address"], "VE3TST@winlink.org");
+    assert_eq!(account["password_source"], "env");
+
+    let compose = run_json(&[
+        "winlink",
+        "compose",
+        "--station",
+        "ve3tst",
+        "--store",
+        &store_arg,
+        "--to",
+        "ja1qso",
+        "--subject",
+        "No radio test",
+        "--body",
+        "Testing Winlink fake sync",
+    ]);
+    assert_eq!(compose["kind"], "winlink-compose-report");
+    assert_eq!(compose["station"], "VE3TST");
+    assert_eq!(compose["folder"], "outbox");
+    assert_eq!(compose["b2f_proposal"]["subject"], "No radio test");
+    let message_id = compose["message_id"].as_str().expect("message id");
+
+    let outbox = run_json(&[
+        "winlink",
+        "outbox",
+        "--station",
+        "ve3tst",
+        "--store",
+        &store_arg,
+    ]);
+    assert_eq!(outbox["kind"], "winlink-mailbox-report");
+    assert_eq!(outbox["message_count"], 1);
+    assert_eq!(outbox["messages"][0]["id"], message_id);
+
+    let sync = run_json(&[
+        "winlink",
+        "sync",
+        "--station",
+        "ve3tst",
+        "--store",
+        &store_arg,
+        "--transport",
+        "fake",
+    ]);
+    assert_eq!(sync["kind"], "winlink-sync-report");
+    assert_eq!(sync["transport"], "fake");
+    assert_eq!(sync["inbox_received"], 1);
+    assert_eq!(sync["outbox_sent"], 1);
+    assert_eq!(sync["queued_remaining"], 0);
+
+    let inbox = run_json(&[
+        "winlink",
+        "inbox",
+        "--station",
+        "ve3tst",
+        "--store",
+        &store_arg,
+    ]);
+    assert_eq!(inbox["message_count"], 1);
+    let inbox_id = inbox["messages"][0]["id"].as_str().expect("inbox id");
+
+    let message = run_json(&[
+        "winlink",
+        "read",
+        inbox_id,
+        "--station",
+        "ve3tst",
+        "--store",
+        &store_arg,
+    ]);
+    assert_eq!(message["kind"], "winlink-message-report");
+    assert_eq!(message["message"]["folder"], "inbox");
+    assert_eq!(message["message"]["to"][0], "VE3TST@winlink.org");
+}
+
+#[test]
+fn winlink_transport_surfaces_are_guarded() {
+    let telnet = run_json(&["winlink", "telnet", "--station", "ve3tst", "--check"]);
+    assert_eq!(telnet["kind"], "winlink-telnet-check-report");
+    assert_eq!(telnet["transport_status"]["transport"], "telnet-cms");
+    assert_eq!(telnet["transport_status"]["dry_run"], true);
+    assert_eq!(telnet["transport_status"]["connected"], false);
+
+    let vara = run_json(&[
+        "winlink",
+        "transport",
+        "--station",
+        "ve3tst",
+        "--transport",
+        "vara",
+    ]);
+    assert_eq!(vara["transport"], "vara");
+    assert_eq!(vara["dry_run"], true);
+    assert!(
+        vara["notes"]
+            .as_array()
+            .expect("notes")
+            .iter()
+            .any(|note| note.as_str().unwrap_or_default().contains("external"))
+    );
+
+    let orca = run_json(&[
+        "winlink",
+        "transport",
+        "--station",
+        "ve3tst",
+        "--transport",
+        "orca",
+    ]);
+    assert_eq!(orca["transport"], "orca");
+    assert!(
+        orca["notes"]
+            .as_array()
+            .expect("notes")
+            .iter()
+            .any(|note| note.as_str().unwrap_or_default().contains("open modem"))
+    );
+}
+
+#[test]
+fn winlink_live_non_fake_send_requires_explicit_allow_send() {
+    let dir = tempdir().expect("tempdir");
+    let store = dir.path().join("winlink-store.json");
+    let store_arg = path_arg(&store);
+
+    run_json(&[
+        "winlink",
+        "compose",
+        "--station",
+        "ve3tst",
+        "--store",
+        &store_arg,
+        "--to",
+        "ja1qso",
+        "--subject",
+        "Guarded",
+        "--body",
+        "Body",
+    ]);
+
+    let error = run_text_failure(&[
+        "winlink",
+        "sync",
+        "--station",
+        "ve3tst",
+        "--store",
+        &store_arg,
+        "--transport",
+        "vara",
+        "--live",
+    ]);
+    assert!(error.contains("requires --allow-send"));
+}
+
+#[test]
 fn station_modes_lists_multi_mode_registry() {
     let report = run_json(&["station", "modes"]);
 
     assert_eq!(report["kind"], "station-mode-registry");
     assert_eq!(report["ok"], true);
-    assert_eq!(report["mode_count"], 6);
+    assert_eq!(report["mode_count"], 9);
     assert!(
         report["modes"]
             .as_array()
@@ -327,6 +501,15 @@ fn station_modes_lists_multi_mode_registry() {
             .expect("modes")
             .iter()
             .any(|mode| mode["label"] == "wsjtx-external" && mode["workspace"] == "weak-signal")
+    );
+    assert!(
+        report["modes"]
+            .as_array()
+            .expect("modes")
+            .iter()
+            .any(|mode| mode["label"] == "winlink-telnet"
+                && mode["workspace"] == "winlink"
+                && mode["capabilities"]["mailbox"] == true)
     );
 }
 

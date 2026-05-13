@@ -41,6 +41,9 @@ pinned git dependencies.
 - `chattybara-chat`: app model for sessions, transcript, mailbox, file offers.
 - `chattybara-station`: station profile, typed events/actions, mode
   capabilities, safety guards, event-log replay, and mode registry data.
+- `chattybara-winlink`: transport-neutral Winlink mailbox model, local store,
+  fake sync, B2F proposal helpers, Telnet/CMS checks, and guarded VARA/orca
+  transport surfaces.
 
 Orca crates are not workspace members here. The `chattybara-cli` crate depends
 on `orca-audio`, `orca-corpus`, `orca-dsp`, `orca-frames`, and

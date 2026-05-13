@@ -36,8 +36,8 @@ backend work.
 - Promote receive-only external adapter scaffolds into fixture-backed adapters
   for JS8Call, WSJT-X, fldigi, and PSK Reporter before adding any TX/reporting
   paths.
-- Add Winlink as a mailbox/workflow backend, starting with Internet
-  Telnet/CMS for live no-radio testing.
+- Continue Winlink mailbox/workflow backend work after the initial local store,
+  fake sync, B2F proposal helper, and Telnet/CMS dry-run surfaces.
 - Keep the Winlink mail model transport-neutral so the same inbox, outbox,
   drafts, attachments, receipts, and sync status can run over multiple links.
 - Add Winlink-over-VARA as an external modem adapter after Telnet/CMS is

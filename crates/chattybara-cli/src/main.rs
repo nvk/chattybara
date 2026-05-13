@@ -22,6 +22,12 @@ use chattybara_station::{
     ModeId, StationAction, StationSafetyState, action_guard_report, built_in_modes,
     fake_events_for_mode, mode_by_label, read_event_log, replay_summary, write_event_log,
 };
+use chattybara_winlink::{
+    B2fProposal, CredentialSource, DEFAULT_CMS_HOST, DEFAULT_CMS_PORT, DEFAULT_TELNET_TIMEOUT_MS,
+    MailFolder, TelnetCmsConfig, WinlinkAccount, WinlinkAttachment, WinlinkStore,
+    WinlinkTransportKind, default_store_path, fake_sync, guarded_dry_run_sync_report,
+    telnet_cms_check, transport_plan_report,
+};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use hamlib::{
     DEFAULT_RIGCTLD_HOST, HamlibConfig, HamlibPttState, hamlib_get_frequency, hamlib_get_mode,
@@ -87,6 +93,7 @@ enum Command {
     Rig(RigArgs),
     Station(StationArgs),
     Simulate(SimulateArgs),
+    Winlink(WinlinkArgs),
 }
 
 #[derive(Debug, Args)]
@@ -315,6 +322,163 @@ enum StationExternalAdapter {
     Wsjtx,
     Fldigi,
     Pskreporter,
+}
+
+#[derive(Debug, Args)]
+struct WinlinkArgs {
+    #[command(subcommand)]
+    command: WinlinkCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum WinlinkCommand {
+    Account(WinlinkAccountArgs),
+    Compose(WinlinkComposeArgs),
+    Inbox(WinlinkMailboxArgs),
+    Outbox(WinlinkMailboxArgs),
+    Read(WinlinkReadArgs),
+    Sync(WinlinkSyncArgs),
+    Telnet(WinlinkTelnetArgs),
+    Transport(WinlinkTransportArgs),
+}
+
+#[derive(Debug, Args)]
+struct WinlinkAccountArgs {
+    #[command(subcommand)]
+    command: WinlinkAccountCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum WinlinkAccountCommand {
+    Setup(WinlinkAccountSetupArgs),
+    Status(WinlinkMailboxArgs),
+}
+
+#[derive(Debug, Args)]
+struct WinlinkAccountSetupArgs {
+    #[arg(long, default_value = "JA1TST")]
+    station: String,
+    #[arg(long)]
+    store: Option<PathBuf>,
+    #[arg(long = "password-source", value_enum, default_value = "none")]
+    password_source: WinlinkCredentialSourceArg,
+}
+
+#[derive(Debug, Args)]
+struct WinlinkComposeArgs {
+    #[arg(long, default_value = "JA1TST")]
+    station: String,
+    #[arg(long)]
+    store: Option<PathBuf>,
+    #[arg(long, required = true)]
+    to: Vec<String>,
+    #[arg(long)]
+    subject: String,
+    #[arg(long)]
+    body: String,
+    #[arg(long = "attach")]
+    attachments: Vec<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+struct WinlinkMailboxArgs {
+    #[arg(long, default_value = "JA1TST")]
+    station: String,
+    #[arg(long)]
+    store: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+struct WinlinkReadArgs {
+    message_id: String,
+    #[arg(long, default_value = "JA1TST")]
+    station: String,
+    #[arg(long)]
+    store: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+struct WinlinkSyncArgs {
+    #[arg(long, default_value = "JA1TST")]
+    station: String,
+    #[arg(long)]
+    store: Option<PathBuf>,
+    #[arg(long, value_enum, default_value = "fake")]
+    transport: WinlinkTransportArg,
+    #[arg(long)]
+    live: bool,
+    #[arg(long = "allow-send")]
+    allow_send: bool,
+    #[arg(long, default_value = DEFAULT_CMS_HOST)]
+    host: String,
+    #[arg(long, default_value_t = DEFAULT_CMS_PORT)]
+    port: u16,
+    #[arg(long = "timeout-ms", default_value_t = DEFAULT_TELNET_TIMEOUT_MS)]
+    timeout_ms: u64,
+}
+
+#[derive(Debug, Args)]
+struct WinlinkTelnetArgs {
+    #[arg(long, default_value = "JA1TST")]
+    station: String,
+    #[arg(long, default_value = DEFAULT_CMS_HOST)]
+    host: String,
+    #[arg(long, default_value_t = DEFAULT_CMS_PORT)]
+    port: u16,
+    #[arg(long = "timeout-ms", default_value_t = DEFAULT_TELNET_TIMEOUT_MS)]
+    timeout_ms: u64,
+    #[arg(long)]
+    live: bool,
+    #[arg(long)]
+    check: bool,
+}
+
+#[derive(Debug, Args)]
+struct WinlinkTransportArgs {
+    #[arg(long, default_value = "JA1TST")]
+    station: String,
+    #[arg(long, value_enum)]
+    transport: WinlinkTransportArg,
+    #[arg(long)]
+    live: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum WinlinkTransportArg {
+    Fake,
+    #[value(alias = "telnet-cms", alias = "cms")]
+    Telnet,
+    #[value(alias = "vara-hf", alias = "vara-fm")]
+    Vara,
+    Orca,
+}
+
+impl From<WinlinkTransportArg> for WinlinkTransportKind {
+    fn from(value: WinlinkTransportArg) -> Self {
+        match value {
+            WinlinkTransportArg::Fake => Self::Fake,
+            WinlinkTransportArg::Telnet => Self::Telnet,
+            WinlinkTransportArg::Vara => Self::Vara,
+            WinlinkTransportArg::Orca => Self::Orca,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum WinlinkCredentialSourceArg {
+    None,
+    Env,
+    Keychain,
+}
+
+impl From<WinlinkCredentialSourceArg> for CredentialSource {
+    fn from(value: WinlinkCredentialSourceArg) -> Self {
+        match value {
+            WinlinkCredentialSourceArg::None => Self::None,
+            WinlinkCredentialSourceArg::Env => Self::Env,
+            WinlinkCredentialSourceArg::Keychain => Self::Keychain,
+        }
+    }
 }
 
 #[derive(Debug, Args)]
@@ -920,6 +1084,7 @@ fn main() -> Result<()> {
         Command::Rig(args) => run_rig(args),
         Command::Station(args) => run_station(args),
         Command::Simulate(args) => run_simulate(args),
+        Command::Winlink(args) => run_winlink(args),
     }
 }
 
@@ -1259,6 +1424,213 @@ fn run_chat(args: ChatArgs) -> Result<()> {
             })
         }
     }
+}
+
+fn run_winlink(args: WinlinkArgs) -> Result<()> {
+    match args.command {
+        WinlinkCommand::Account(args) => match args.command {
+            WinlinkAccountCommand::Setup(args) => {
+                let store_path = resolve_winlink_store_path(args.store, &args.station)?;
+                let mut store = WinlinkStore::load_or_new(&store_path, &args.station)
+                    .with_context(|| format!("loading {}", store_path.display()))?;
+                let account = WinlinkAccount::new(&args.station, args.password_source.into())?;
+                store.set_account(account.clone());
+                store
+                    .save(&store_path)
+                    .with_context(|| format!("saving {}", store_path.display()))?;
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({
+                        "kind": "winlink-account-setup-report",
+                        "ok": true,
+                        "station": account.station,
+                        "address": account.address,
+                        "password_source": account.password_source.label(),
+                        "store": store_path,
+                    }))?
+                );
+                Ok(())
+            }
+            WinlinkAccountCommand::Status(args) => {
+                let store_path = resolve_winlink_store_path(args.store, &args.station)?;
+                let store = WinlinkStore::load_or_new(&store_path, &args.station)
+                    .with_context(|| format!("loading {}", store_path.display()))?;
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({
+                        "kind": "winlink-account-status-report",
+                        "ok": true,
+                        "station": store.station,
+                        "store": store_path,
+                        "account": store.account,
+                        "message_count": store.messages.len(),
+                        "inbox_count": store.messages_in(MailFolder::Inbox).len(),
+                        "outbox_count": store.messages_in(MailFolder::Outbox).len(),
+                        "sent_count": store.messages_in(MailFolder::Sent).len(),
+                    }))?
+                );
+                Ok(())
+            }
+        },
+        WinlinkCommand::Compose(args) => {
+            let store_path = resolve_winlink_store_path(args.store, &args.station)?;
+            let mut store = WinlinkStore::load_or_new(&store_path, &args.station)
+                .with_context(|| format!("loading {}", store_path.display()))?;
+            let attachments = args
+                .attachments
+                .iter()
+                .map(WinlinkAttachment::from_path)
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            let id = store.queue_message(args.to, args.subject, args.body, attachments)?;
+            let proposal =
+                B2fProposal::from_message(store.find_message(&id).expect("queued message"));
+            store
+                .save(&store_path)
+                .with_context(|| format!("saving {}", store_path.display()))?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&json!({
+                    "kind": "winlink-compose-report",
+                    "ok": true,
+                    "station": store.station,
+                    "store": store_path,
+                    "message_id": id,
+                    "folder": MailFolder::Outbox.label(),
+                    "b2f_proposal": proposal,
+                }))?
+            );
+            Ok(())
+        }
+        WinlinkCommand::Inbox(args) => run_winlink_mailbox(args, MailFolder::Inbox),
+        WinlinkCommand::Outbox(args) => run_winlink_mailbox(args, MailFolder::Outbox),
+        WinlinkCommand::Read(args) => {
+            let store_path = resolve_winlink_store_path(args.store, &args.station)?;
+            let store = WinlinkStore::load_or_new(&store_path, &args.station)
+                .with_context(|| format!("loading {}", store_path.display()))?;
+            let message = store.find_message(&args.message_id)?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&json!({
+                    "kind": "winlink-message-report",
+                    "ok": true,
+                    "station": store.station,
+                    "store": store_path,
+                    "message": message,
+                    "b2f_proposal": B2fProposal::from_message(message),
+                }))?
+            );
+            Ok(())
+        }
+        WinlinkCommand::Sync(args) => {
+            let store_path = resolve_winlink_store_path(args.store, &args.station)?;
+            let mut store = WinlinkStore::load_or_new(&store_path, &args.station)
+                .with_context(|| format!("loading {}", store_path.display()))?;
+            let transport = WinlinkTransportKind::from(args.transport);
+            let report = if transport == WinlinkTransportKind::Fake {
+                let report = fake_sync(&mut store, Some(store_path.clone()))?;
+                store
+                    .save(&store_path)
+                    .with_context(|| format!("saving {}", store_path.display()))?;
+                report
+            } else if transport == WinlinkTransportKind::Telnet && args.live {
+                let status = telnet_cms_check(TelnetCmsConfig {
+                    station: args.station.clone(),
+                    host: args.host,
+                    port: args.port,
+                    timeout_ms: args.timeout_ms,
+                    live: true,
+                })?;
+                if store.messages_in(MailFolder::Outbox).is_empty() {
+                    bail!(
+                        "live Telnet/CMS connectivity succeeded, but full B2F sync is not implemented in this alpha: {}",
+                        serde_json::to_string(&status)?
+                    );
+                }
+                guarded_dry_run_sync_report(
+                    &store,
+                    Some(store_path.clone()),
+                    transport,
+                    true,
+                    args.allow_send,
+                )?
+            } else {
+                guarded_dry_run_sync_report(
+                    &store,
+                    Some(store_path.clone()),
+                    transport,
+                    args.live,
+                    args.allow_send,
+                )?
+            };
+            println!("{}", serde_json::to_string_pretty(&report)?);
+            Ok(())
+        }
+        WinlinkCommand::Telnet(args) => {
+            let report = telnet_cms_check(TelnetCmsConfig {
+                station: args.station,
+                host: args.host,
+                port: args.port,
+                timeout_ms: args.timeout_ms,
+                live: args.live,
+            })?;
+            let output = json!({
+                "kind": "winlink-telnet-check-report",
+                "ok": report.ok,
+                "check_requested": args.check,
+                "transport_status": report,
+            });
+            println!("{}", serde_json::to_string_pretty(&output)?);
+            Ok(())
+        }
+        WinlinkCommand::Transport(args) => {
+            let report = transport_plan_report(
+                args.station,
+                WinlinkTransportKind::from(args.transport),
+                args.live,
+            )?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+            Ok(())
+        }
+    }
+}
+
+fn run_winlink_mailbox(args: WinlinkMailboxArgs, folder: MailFolder) -> Result<()> {
+    let store_path = resolve_winlink_store_path(args.store, &args.station)?;
+    let store = WinlinkStore::load_or_new(&store_path, &args.station)
+        .with_context(|| format!("loading {}", store_path.display()))?;
+    let messages = store
+        .messages_in(folder)
+        .into_iter()
+        .map(|message| {
+            json!({
+                "id": message.id,
+                "from": message.from,
+                "to": message.to,
+                "subject": message.subject,
+                "state": message.state,
+                "attachment_count": message.attachments.len(),
+                "transport": message.transport,
+            })
+        })
+        .collect::<Vec<_>>();
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&json!({
+            "kind": "winlink-mailbox-report",
+            "ok": true,
+            "station": store.station,
+            "store": store_path,
+            "folder": folder.label(),
+            "message_count": messages.len(),
+            "messages": messages,
+        }))?
+    );
+    Ok(())
+}
+
+fn resolve_winlink_store_path(path: Option<PathBuf>, station: &str) -> Result<PathBuf> {
+    path.map(Ok)
+        .unwrap_or_else(|| Ok(default_store_path(station)?))
 }
 
 fn run_rig(args: RigArgs) -> Result<()> {
