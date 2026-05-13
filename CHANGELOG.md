@@ -2,6 +2,15 @@
 
 All notable public release changes are tracked here.
 
+## 0.1.0-alpha.6 - 2026-05-13
+
+- Fixed live Telnet/CMS sync prompt handling by consuming full CR-terminated
+  login prompts and sending each access-code line as one write.
+- Changed the default live CMS endpoint to `cms-z.winlink.org` because
+  production CMS rejects unknown client types.
+- Fixed the early B2F receive sequence to send `;FW`, the local SID, and `FF`
+  before parsing pending inbound proposals.
+
 ## 0.1.0-alpha.5 - 2026-05-13
 
 - Changed the default Winlink CMS endpoint to `cms.winlink.org`.

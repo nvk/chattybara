@@ -504,17 +504,17 @@ fn winlink_telnet_live_sync_lists_fake_cms_inbox() {
         let (mut stream, _) = listener.accept().expect("accept");
         let mut reader = BufReader::new(stream.try_clone().expect("clone"));
 
-        stream.write_all(b"Callsign :").expect("write callsign");
+        stream.write_all(b"Callsign :\r").expect("write callsign");
         assert_eq!(read_nonempty_cr_line(&mut reader), "JA1TST");
-        stream.write_all(b"Password :").expect("write password");
+        stream.write_all(b"Password :\r").expect("write password");
         assert_eq!(read_nonempty_cr_line(&mut reader), "CMSTELNET");
         stream
             .write_all(b"[WL2K-5.0-B2FHM$]\r;PQ: 23753528\rCMS>\r")
             .expect("write handshake");
-        assert_eq!(read_nonempty_cr_line(&mut reader), ";FW: JA1TST");
+        assert_eq!(read_nonempty_cr_line(&mut reader), ";FW JA1TST");
         assert!(read_nonempty_cr_line(&mut reader).starts_with("[chattybara-"));
         assert_eq!(read_nonempty_cr_line(&mut reader), ";PR: 95074758");
-        assert_eq!(read_nonempty_cr_line(&mut reader), "; wl2k DE JA1TST ()");
+        assert_eq!(read_nonempty_cr_line(&mut reader), "FF");
 
         let proposal = "FC EM CLI-MID-1 256 128 0".to_owned();
         let checksum = b2f_checksum(std::slice::from_ref(&proposal));

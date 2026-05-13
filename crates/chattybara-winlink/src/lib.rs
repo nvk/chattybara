@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 use thiserror::Error;
 
-pub const DEFAULT_CMS_HOST: &str = "cms.winlink.org";
+pub const DEFAULT_CMS_HOST: &str = "cms-z.winlink.org";
 pub const DEFAULT_CMS_PORT: u16 = 8772;
 pub const DEFAULT_TELNET_TIMEOUT_MS: u64 = 3000;
 pub const WINLINK_PASSWORD_ENV: &str = "CHATTYBARA_WINLINK_PASSWORD";
@@ -475,7 +475,8 @@ pub fn telnet_cms_check(config: TelnetCmsConfig) -> WinlinkResult<TransportStatu
             greeting: None,
             notes: vec![
                 "dry run only; pass --live to open a TCP connection".to_owned(),
-                "B2F authentication and message exchange are not enabled in this alpha".to_owned(),
+                "live Telnet/CMS sync lists pending inbox metadata; bodies and sending remain guarded"
+                    .to_owned(),
             ],
         });
     }
@@ -515,7 +516,8 @@ pub fn telnet_cms_check(config: TelnetCmsConfig) -> WinlinkResult<TransportStatu
         greeting,
         notes: vec![
             "TCP connectivity check only; no password was sent".to_owned(),
-            "full Telnet/CMS B2F sync remains guarded behind future implementation".to_owned(),
+            "live Telnet/CMS sync lists pending inbox metadata; bodies and sending remain guarded"
+                .to_owned(),
         ],
     })
 }
@@ -557,17 +559,14 @@ pub fn telnet_cms_receive_sync(
     session.write_line(CMS_TELNET_PASSWORD)?;
 
     let handshake = session.read_remote_handshake()?;
+    session.write_line(&format!(";FW {station}"))?;
+    session.write_line(&local_sid_line())?;
     if let Some(challenge) = handshake.secure_challenge.as_deref() {
         let password = password.ok_or(WinlinkError::MissingPasswordEnv(WINLINK_PASSWORD_ENV))?;
         let response = secure_login_response(challenge, password);
-        session.write_line(&format!(";FW: {station}"))?;
-        session.write_line(&local_sid_line())?;
         session.write_line(&format!(";PR: {response}"))?;
-    } else {
-        session.write_line(&format!(";FW: {station}"))?;
-        session.write_line(&local_sid_line())?;
     }
-    session.write_line(&format!("; wl2k DE {station} ()"))?;
+    session.write_line("FF")?;
 
     let mut pending = std::collections::HashMap::<String, PendingCmsMessage>::new();
     let mut proposals = Vec::<InboundCmsProposal>::new();
@@ -743,8 +742,10 @@ impl TelnetCmsSession {
     }
 
     fn write_line(&mut self, line: &str) -> WinlinkResult<()> {
-        self.stream.write_all(line.as_bytes())?;
-        self.stream.write_all(b"\r")?;
+        let mut buffer = Vec::with_capacity(line.len() + 1);
+        buffer.extend_from_slice(line.as_bytes());
+        buffer.push(b'\r');
+        self.stream.write_all(&buffer)?;
         self.stream.flush()?;
         Ok(())
     }
@@ -765,7 +766,7 @@ impl TelnetCmsSession {
                     matched |= patterns
                         .iter()
                         .any(|pattern| contains_ascii_case_insensitive(&buffer, pattern));
-                    if matched && matches!(byte[0], b':' | b'\r' | b'\n') {
+                    if matched && matches!(byte[0], b'\r' | b'\n') {
                         return Ok(String::from_utf8_lossy(&buffer).trim().to_owned());
                     }
                 }
@@ -1243,20 +1244,20 @@ mod tests {
             let read_stream = stream.try_clone().expect("clone");
             let mut reader = BufReader::new(read_stream);
 
-            stream.write_all(b"Callsign :").expect("write callsign");
+            stream.write_all(b"Callsign :\r").expect("write callsign");
             assert_eq!(read_cr_line(&mut reader), "JA1TST");
-            stream.write_all(b"Password :").expect("write password");
+            stream.write_all(b"Password :\r").expect("write password");
             assert_eq!(read_cr_line(&mut reader), CMS_TELNET_PASSWORD);
             stream
                 .write_all(b"[WL2K-5.0-B2FHM$]\r;PQ: 23753528\rCMS>\r")
                 .expect("write handshake");
-            assert_eq!(read_cr_line(&mut reader), ";FW: JA1TST");
+            assert_eq!(read_cr_line(&mut reader), ";FW JA1TST");
             assert!(
                 read_cr_line(&mut reader).starts_with("[chattybara-"),
                 "local SID"
             );
             assert_eq!(read_cr_line(&mut reader), ";PR: 95074758");
-            assert_eq!(read_cr_line(&mut reader), "; wl2k DE JA1TST ()");
+            assert_eq!(read_cr_line(&mut reader), "FF");
 
             let proposal = "FC EM TESTMID123 128 64 0".to_owned();
             let checksum = proposal_checksum(std::slice::from_ref(&proposal));

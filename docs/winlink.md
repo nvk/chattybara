@@ -32,8 +32,8 @@ only the intended credential source:
 - `env`
 - `keychain`
 
-For live Telnet/CMS inbox metadata sync, put the Winlink account password in
-the process environment:
+If CMS presents a secure-login challenge, put the Winlink account password in
+the process environment before live sync:
 
 ```sh
 export CHATTYBARA_WINLINK_PASSWORD='your-winlink-password'
@@ -86,7 +86,9 @@ Dry-run check:
 chattybara winlink telnet --check
 ```
 
-The default CMS endpoint is `cms.winlink.org:8772`.
+The default CMS endpoint is `cms-z.winlink.org:8772`. Production CMS currently
+rejects unknown alpha client identifiers; override `--host cms.winlink.org`
+only after the client type is registered or explicitly accepted.
 
 Live TCP check only:
 
@@ -104,16 +106,12 @@ This logs into the CMS and lists pending inbox proposals without downloading or
 clearing message bodies:
 
 ```sh
-export CHATTYBARA_WINLINK_PASSWORD='your-winlink-password'
-
 chattybara winlink sync \
   --transport telnet \
   --live
 
 chattybara winlink inbox
 chattybara winlink read MESSAGE-ID
-
-unset CHATTYBARA_WINLINK_PASSWORD
 ```
 
 The saved inbox entries are metadata placeholders. `last_error` is set to
