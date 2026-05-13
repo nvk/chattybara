@@ -63,7 +63,7 @@ chattybara modem roundtrip "hello chattybara"
 chattybara simulate app-link --payload-bytes 180 --drop-first-attempt --duplicate-deliveries
 chattybara station config --station JA1TST
 chattybara winlink telnet --check
-CHATTYBARA_WINLINK_PASSWORD=test chattybara winlink sync --transport telnet
+chattybara winlink sync --transport telnet
 ```
 
 Run orca binary checks in the orca repository.

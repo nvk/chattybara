@@ -23,6 +23,7 @@ pub const DEFAULT_CMS_HOST: &str = "cms-z.winlink.org";
 pub const DEFAULT_CMS_PORT: u16 = 8772;
 pub const DEFAULT_TELNET_TIMEOUT_MS: u64 = 3000;
 pub const WINLINK_PASSWORD_ENV: &str = "CHATTYBARA_WINLINK_PASSWORD";
+pub const WINLINK_KEYCHAIN_SERVICE: &str = "chattybara-winlink";
 const CMS_TELNET_PASSWORD: &str = "CMSTELNET";
 const TELNET_PROMPT_MAX_BYTES: usize = 4096;
 const B2F_LINE_MAX_BYTES: usize = 8192;
@@ -51,6 +52,8 @@ pub enum WinlinkError {
     EmptySubject,
     #[error("empty Winlink body")]
     EmptyBody,
+    #[error("empty Winlink password")]
+    EmptyPassword,
     #[error("unknown Winlink transport: {0}")]
     UnknownTransport(String),
     #[error("Winlink message not found: {0}")]
@@ -63,8 +66,16 @@ pub enum WinlinkError {
     SendNotAllowed { transport: String },
     #[error("invalid B2F proposal: {0}")]
     InvalidB2fProposal(String),
-    #[error("live Winlink Telnet/CMS inbox check requires {0} in the environment")]
+    #[error(
+        "live Winlink Telnet/CMS secure login requires {0} in the environment or a configured keychain password"
+    )]
     MissingPasswordEnv(&'static str),
+    #[error(
+        "Winlink keychain password not found for {station}; run `chattybara winlink account password set`"
+    )]
+    MissingKeychainPassword { station: String },
+    #[error("Winlink keychain failed: {0}")]
+    Keychain(String),
     #[error("Winlink Telnet/CMS protocol error: {0}")]
     Protocol(String),
     #[error("Winlink store I/O failed: {0}")]
@@ -547,6 +558,108 @@ pub fn winlink_password_from_env() -> Option<String> {
         .ok()
         .map(|value| value.trim().to_owned())
         .filter(|value| !value.is_empty())
+}
+
+pub fn winlink_password_for_account(
+    account: Option<&WinlinkAccount>,
+    station: &str,
+) -> WinlinkResult<Option<String>> {
+    if let Some(password) = winlink_password_from_env() {
+        return Ok(Some(password));
+    }
+    match account
+        .map(|account| account.password_source)
+        .unwrap_or(CredentialSource::Env)
+    {
+        CredentialSource::None | CredentialSource::Env => Ok(None),
+        CredentialSource::Keychain => {
+            let station = normalize_call(station)?;
+            winlink_password_from_keychain(&station)?.map_or_else(
+                || Err(WinlinkError::MissingKeychainPassword { station }),
+                |password| Ok(Some(password)),
+            )
+        }
+    }
+}
+
+pub fn winlink_password_from_keychain(station: &str) -> WinlinkResult<Option<String>> {
+    keychain_get_password(station)
+}
+
+pub fn save_winlink_password_to_keychain(station: &str, password: &str) -> WinlinkResult<()> {
+    let password = password.trim_end_matches(['\r', '\n']);
+    if password.is_empty() {
+        return Err(WinlinkError::EmptyPassword);
+    }
+    keychain_set_password(station, password)
+}
+
+pub fn delete_winlink_password_from_keychain(station: &str) -> WinlinkResult<bool> {
+    keychain_delete_password(station)
+}
+
+pub fn winlink_keychain_password_exists(station: &str) -> WinlinkResult<bool> {
+    Ok(winlink_password_from_keychain(station)?.is_some())
+}
+
+#[cfg(target_os = "macos")]
+fn keychain_entry(station: &str) -> WinlinkResult<keyring::Entry> {
+    let station = normalize_call(station)?;
+    keyring::Entry::new(WINLINK_KEYCHAIN_SERVICE, &station).map_err(keychain_error)
+}
+
+#[cfg(target_os = "macos")]
+fn keychain_get_password(station: &str) -> WinlinkResult<Option<String>> {
+    match keychain_entry(station)?.get_password() {
+        Ok(password) => Ok(Some(password)),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(error) => Err(keychain_error(error)),
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn keychain_set_password(station: &str, password: &str) -> WinlinkResult<()> {
+    keychain_entry(station)?
+        .set_password(password)
+        .map_err(keychain_error)
+}
+
+#[cfg(target_os = "macos")]
+fn keychain_delete_password(station: &str) -> WinlinkResult<bool> {
+    match keychain_entry(station)?.delete_credential() {
+        Ok(()) => Ok(true),
+        Err(keyring::Error::NoEntry) => Ok(false),
+        Err(error) => Err(keychain_error(error)),
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn keychain_error(error: keyring::Error) -> WinlinkError {
+    WinlinkError::Keychain(error.to_string())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn keychain_get_password(station: &str) -> WinlinkResult<Option<String>> {
+    let _ = normalize_call(station)?;
+    Err(WinlinkError::Keychain(
+        "keychain credential source is currently supported on macOS only".to_owned(),
+    ))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn keychain_set_password(station: &str, _password: &str) -> WinlinkResult<()> {
+    let _ = normalize_call(station)?;
+    Err(WinlinkError::Keychain(
+        "keychain credential source is currently supported on macOS only".to_owned(),
+    ))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn keychain_delete_password(station: &str) -> WinlinkResult<bool> {
+    let _ = normalize_call(station)?;
+    Err(WinlinkError::Keychain(
+        "keychain credential source is currently supported on macOS only".to_owned(),
+    ))
 }
 
 pub fn telnet_cms_receive_sync(

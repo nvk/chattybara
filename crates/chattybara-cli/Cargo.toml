@@ -31,6 +31,7 @@ clap.workspace = true
 cpal.workspace = true
 crossterm.workspace = true
 ratatui.workspace = true
+rpassword.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serialport.workspace = true

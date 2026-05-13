@@ -2,6 +2,15 @@
 
 All notable public release changes are tracked here.
 
+## Unreleased
+
+- Added macOS Keychain-backed Winlink password storage via
+  `chattybara winlink account password set`, with stdin and secure prompt
+  input paths.
+- Live Telnet/CMS sync now reads the configured keychain password when the
+  account password source is `keychain`; `CHATTYBARA_WINLINK_PASSWORD` remains
+  a temporary override.
+
 ## 0.1.0-alpha.7 - 2026-05-13
 
 - Added live Telnet/CMS B2F payload download for supported inbound `FC` and

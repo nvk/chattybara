@@ -52,7 +52,7 @@ out/install-smoke/bin/chattybara modem roundtrip "hello chattybara"
 out/install-smoke/bin/chattybara simulate app-link --payload-bytes 180 --drop-first-attempt --duplicate-deliveries
 out/install-smoke/bin/chattybara station config --station JA1TST --path out/install-smoke/settings.toml
 CHATTYBARA_SETTINGS=out/install-smoke/settings.toml out/install-smoke/bin/chattybara winlink telnet --check
-CHATTYBARA_SETTINGS=out/install-smoke/settings.toml CHATTYBARA_WINLINK_PASSWORD=test out/install-smoke/bin/chattybara winlink sync --transport telnet
+CHATTYBARA_SETTINGS=out/install-smoke/settings.toml out/install-smoke/bin/chattybara winlink sync --transport telnet
 ```
 
 Run standalone orca release checks in `https://gitlab.com/yokij/orca`.

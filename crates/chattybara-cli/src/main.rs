@@ -25,9 +25,10 @@ use chattybara_station::{
 use chattybara_winlink::{
     B2fProposal, CredentialSource, DEFAULT_CMS_HOST, DEFAULT_CMS_PORT, DEFAULT_TELNET_TIMEOUT_MS,
     MailFolder, TelnetCmsConfig, WinlinkAccount, WinlinkAttachment, WinlinkStore,
-    WinlinkTransportKind, default_store_path, fake_sync, guarded_dry_run_sync_report,
-    normalize_call, telnet_cms_check, telnet_cms_receive_sync, transport_plan_report,
-    winlink_password_from_env,
+    WinlinkTransportKind, default_store_path, delete_winlink_password_from_keychain, fake_sync,
+    guarded_dry_run_sync_report, normalize_call, save_winlink_password_to_keychain,
+    telnet_cms_check, telnet_cms_receive_sync, transport_plan_report,
+    winlink_keychain_password_exists, winlink_password_for_account,
 };
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use hamlib::{
@@ -65,6 +66,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::fs;
+use std::io::{self, IsTerminal, Read as _};
 use std::path::{Path, PathBuf};
 use tui::{
     ChatTuiBackend, ChatTuiConfig, ChatTuiLocalNodeConfig, ChatTuiSetupConfig, run_chat_tui,
@@ -364,6 +366,7 @@ struct WinlinkAccountArgs {
 #[derive(Debug, Subcommand)]
 enum WinlinkAccountCommand {
     Setup(WinlinkAccountSetupArgs),
+    Password(WinlinkPasswordArgs),
     Status(WinlinkMailboxArgs),
 }
 
@@ -375,6 +378,29 @@ struct WinlinkAccountSetupArgs {
     store: Option<PathBuf>,
     #[arg(long = "password-source", value_enum, default_value = "none")]
     password_source: WinlinkCredentialSourceArg,
+}
+
+#[derive(Debug, Args)]
+struct WinlinkPasswordArgs {
+    #[command(subcommand)]
+    command: WinlinkPasswordCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum WinlinkPasswordCommand {
+    Set(WinlinkPasswordSetArgs),
+    Delete(WinlinkMailboxArgs),
+    Status(WinlinkMailboxArgs),
+}
+
+#[derive(Debug, Args)]
+struct WinlinkPasswordSetArgs {
+    #[arg(long)]
+    station: Option<String>,
+    #[arg(long)]
+    store: Option<PathBuf>,
+    #[arg(long = "password-stdin")]
+    password_stdin: bool,
 }
 
 #[derive(Debug, Args)]
@@ -1486,6 +1512,7 @@ fn run_winlink(args: WinlinkArgs) -> Result<()> {
                 );
                 Ok(())
             }
+            WinlinkAccountCommand::Password(args) => run_winlink_account_password(args),
             WinlinkAccountCommand::Status(args) => {
                 let station = resolve_station(args.station.as_deref())?;
                 let store_path = resolve_winlink_store_path(args.store, &station)?;
@@ -1572,7 +1599,7 @@ fn run_winlink(args: WinlinkArgs) -> Result<()> {
                     .with_context(|| format!("saving {}", store_path.display()))?;
                 report
             } else if transport == WinlinkTransportKind::Telnet && args.live {
-                let password = winlink_password_from_env();
+                let password = winlink_password_for_account(store.account.as_ref(), &station)?;
                 let report = telnet_cms_receive_sync(
                     &mut store,
                     Some(store_path.clone()),
@@ -1631,6 +1658,109 @@ fn run_winlink(args: WinlinkArgs) -> Result<()> {
             Ok(())
         }
     }
+}
+
+fn run_winlink_account_password(args: WinlinkPasswordArgs) -> Result<()> {
+    match args.command {
+        WinlinkPasswordCommand::Set(args) => {
+            let station = resolve_station(args.station.as_deref())?;
+            let store_path = resolve_winlink_store_path(args.store, &station)?;
+            let password = read_winlink_password(args.password_stdin)?;
+            save_winlink_password_to_keychain(&station, &password)?;
+            let mut store = WinlinkStore::load_or_new(&store_path, &station)
+                .with_context(|| format!("loading {}", store_path.display()))?;
+            let account = WinlinkAccount::new(&station, CredentialSource::Keychain)?;
+            store.set_account(account.clone());
+            store
+                .save(&store_path)
+                .with_context(|| format!("saving {}", store_path.display()))?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&json!({
+                    "kind": "winlink-account-password-report",
+                    "ok": true,
+                    "action": "set",
+                    "station": account.station,
+                    "address": account.address,
+                    "password_source": account.password_source.label(),
+                    "keychain_present": true,
+                    "store": store_path,
+                }))?
+            );
+            Ok(())
+        }
+        WinlinkPasswordCommand::Delete(args) => {
+            let station = resolve_station(args.station.as_deref())?;
+            let store_path = resolve_winlink_store_path(args.store, &station)?;
+            let deleted = delete_winlink_password_from_keychain(&station)?;
+            let mut store = WinlinkStore::load_or_new(&store_path, &station)
+                .with_context(|| format!("loading {}", store_path.display()))?;
+            let account = WinlinkAccount::new(&station, CredentialSource::None)?;
+            store.set_account(account.clone());
+            store
+                .save(&store_path)
+                .with_context(|| format!("saving {}", store_path.display()))?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&json!({
+                    "kind": "winlink-account-password-report",
+                    "ok": true,
+                    "action": "delete",
+                    "station": account.station,
+                    "address": account.address,
+                    "password_source": account.password_source.label(),
+                    "keychain_deleted": deleted,
+                    "keychain_present": false,
+                    "store": store_path,
+                }))?
+            );
+            Ok(())
+        }
+        WinlinkPasswordCommand::Status(args) => {
+            let station = resolve_station(args.station.as_deref())?;
+            let store_path = resolve_winlink_store_path(args.store, &station)?;
+            let store = WinlinkStore::load_or_new(&store_path, &station)
+                .with_context(|| format!("loading {}", store_path.display()))?;
+            let keychain_present = winlink_keychain_password_exists(&station)?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&json!({
+                    "kind": "winlink-account-password-report",
+                    "ok": true,
+                    "action": "status",
+                    "station": store.station,
+                    "password_source": store
+                        .account
+                        .as_ref()
+                        .map(|account| account.password_source.label()),
+                    "keychain_present": keychain_present,
+                    "store": store_path,
+                }))?
+            );
+            Ok(())
+        }
+    }
+}
+
+fn read_winlink_password(password_stdin: bool) -> Result<String> {
+    let mut password = String::new();
+    if password_stdin {
+        io::stdin()
+            .read_to_string(&mut password)
+            .context("reading Winlink password from stdin")?;
+    } else if io::stdin().is_terminal() {
+        password = rpassword::prompt_password("Winlink password: ")
+            .context("reading Winlink password from terminal")?;
+    } else {
+        bail!(
+            "pass --password-stdin or run from an interactive terminal to set a keychain password"
+        );
+    }
+    let password = password.trim_end_matches(['\r', '\n']).to_owned();
+    if password.is_empty() {
+        bail!("empty Winlink password");
+    }
+    Ok(password)
 }
 
 fn run_winlink_mailbox(args: WinlinkMailboxArgs, folder: MailFolder) -> Result<()> {

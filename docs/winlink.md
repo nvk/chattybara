@@ -33,8 +33,22 @@ only the intended credential source:
 - `env`
 - `keychain`
 
-If CMS presents a secure-login challenge, put the Winlink account password in
-the process environment before live sync:
+On macOS, the preferred live-sync setup stores the Winlink account password in
+Keychain:
+
+```sh
+chattybara winlink account password set
+```
+
+For scripted setup, read the secret from stdin so it does not appear in shell
+history or process arguments:
+
+```sh
+printf '%s\n' "$WINLINK_PASSWORD" | chattybara winlink account password set --password-stdin
+```
+
+`CHATTYBARA_WINLINK_PASSWORD` is still supported as a temporary override. If it
+is present, live sync uses it before checking the configured keychain source:
 
 ```sh
 export CHATTYBARA_WINLINK_PASSWORD='your-winlink-password'
@@ -49,7 +63,7 @@ chattybara station config --station JA1TST
 
 chattybara winlink account setup \
   --store out/winlink/store.json \
-  --password-source env
+  --password-source keychain
 ```
 
 Without `--store`, chattybara uses:

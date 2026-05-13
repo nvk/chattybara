@@ -128,8 +128,8 @@ cargo run -p chattybara-cli -- chat tui
 - `chattybara winlink account`, `compose`, `inbox`, `outbox`, `read`, `sync`,
   `telnet`, and `transport` expose the no-radio Winlink mailbox workflow and
   guarded Telnet/CMS, VARA, and orca transport surfaces. Live Telnet/CMS sync
-  can authenticate and list pending inbox metadata while deferring message
-  bodies.
+  can authenticate, download supported inbox messages, send queued mail behind
+  `--allow-send`, and use macOS Keychain for stored Winlink passwords.
 - `chattybara lab run`, `snapshot`, and `compare` run no-hardware release
   checks.
 
