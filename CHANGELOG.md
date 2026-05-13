@@ -2,6 +2,16 @@
 
 All notable public release changes are tracked here.
 
+## 0.1.0-alpha.12 - 2026-05-13
+
+- Added live-capable receive adapters for JS8Call TCP JSON, WSJT-X UDP decode
+  datagrams, fldigi XML-RPC RX text, PSK Reporter HTTP/HTTPS spot queries, and
+  CW fixture decoding.
+- Added guarded JS8Call and fldigi transmit command paths that require both
+  adapter TX enablement and explicit `--allow-transmit`.
+- Added a live Winlink VARA command-port status probe while keeping VARA
+  mailbox sync disabled until the full session layer exists.
+
 ## 0.1.0-alpha.11 - 2026-05-13
 
 - Added `chattybara station protocol-suite` to validate the JS8Call, WSJT-X/FT8,

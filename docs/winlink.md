@@ -157,6 +157,18 @@ VARA is modeled as an external operator-installed modem transport:
 chattybara winlink transport --transport vara
 ```
 
+The live status check only probes the VARA command port. It does not key PTT,
+open the data port, authenticate, or sync mail:
+
+```sh
+chattybara winlink transport \
+  --transport vara \
+  --live \
+  --host 127.0.0.1 \
+  --command-port 8300 \
+  --data-port 8301
+```
+
 orca is modeled as the experimental open modem transport:
 
 ```sh

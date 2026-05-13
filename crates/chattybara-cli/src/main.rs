@@ -1,5 +1,6 @@
 mod app_protocol;
 mod audio_devices;
+mod external_adapters;
 mod hamlib;
 mod ic705;
 mod live_audio;
@@ -24,13 +25,15 @@ use chattybara_station::{
 };
 use chattybara_winlink::{
     B2fProposal, CredentialSource, DEFAULT_CMS_HOST, DEFAULT_CMS_PORT, DEFAULT_TELNET_TIMEOUT_MS,
-    MailFolder, TelnetCmsConfig, WinlinkAccount, WinlinkAttachment, WinlinkStore,
+    DEFAULT_VARA_COMMAND_PORT, DEFAULT_VARA_DATA_PORT, DEFAULT_VARA_HOST, MailFolder,
+    TelnetCmsConfig, VaraStatusConfig, WinlinkAccount, WinlinkAttachment, WinlinkStore,
     WinlinkTransportKind, default_store_path, delete_winlink_password_from_keychain, fake_sync,
     guarded_dry_run_sync_report, normalize_call, save_winlink_password_to_keychain,
-    telnet_cms_check, telnet_cms_receive_sync, transport_plan_report,
+    telnet_cms_check, telnet_cms_receive_sync, transport_plan_report, vara_status_check,
     winlink_keychain_password_exists, winlink_password_for_account,
 };
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use external_adapters::{ExternalAdapterId, ExternalAdapterRunConfig, run_external_adapter};
 use hamlib::{
     DEFAULT_RIGCTLD_HOST, HamlibConfig, HamlibPttState, hamlib_get_frequency, hamlib_get_mode,
     hamlib_set_ptt, hamlib_status,
@@ -331,13 +334,39 @@ struct StationExternalArgs {
     #[arg(long, value_enum)]
     adapter: StationExternalAdapter,
     #[arg(long)]
+    station: Option<String>,
+    #[arg(long)]
     host: Option<String>,
     #[arg(long)]
     port: Option<u16>,
     #[arg(long)]
+    live: bool,
+    #[arg(long = "timeout-ms", default_value_t = 1000)]
+    timeout_ms: u64,
+    #[arg(long = "max-events", default_value_t = 8)]
+    max_events: usize,
+    #[arg(long)]
+    fixture: Option<PathBuf>,
+    #[arg(long)]
+    out: Option<PathBuf>,
+    #[arg(long)]
     enable_tx: bool,
+    #[arg(long = "allow-transmit")]
+    allow_transmit: bool,
+    #[arg(long = "send-to")]
+    send_to: Option<String>,
+    #[arg(long)]
+    message: Option<String>,
     #[arg(long = "enable-reporting")]
     enable_reporting: bool,
+    #[arg(long = "psk-scheme", default_value = "https")]
+    psk_scheme: String,
+    #[arg(long = "psk-path", default_value = "/query")]
+    psk_path: String,
+    #[arg(long = "psk-query-call")]
+    psk_query_call: Option<String>,
+    #[arg(long = "psk-lookback-seconds", default_value_t = 21_600)]
+    psk_lookback_seconds: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -345,6 +374,8 @@ enum StationExternalAdapter {
     Js8call,
     Wsjtx,
     Fldigi,
+    #[value(alias = "cw")]
+    CwAssist,
     Pskreporter,
 }
 
@@ -354,7 +385,20 @@ impl StationExternalAdapter {
             Self::Js8call => "js8call",
             Self::Wsjtx => "wsjtx",
             Self::Fldigi => "fldigi",
+            Self::CwAssist => "cw-assist",
             Self::Pskreporter => "pskreporter",
+        }
+    }
+}
+
+impl From<StationExternalAdapter> for ExternalAdapterId {
+    fn from(value: StationExternalAdapter) -> Self {
+        match value {
+            StationExternalAdapter::Js8call => Self::Js8call,
+            StationExternalAdapter::Wsjtx => Self::Wsjtx,
+            StationExternalAdapter::Fldigi => Self::Fldigi,
+            StationExternalAdapter::CwAssist => Self::CwAssist,
+            StationExternalAdapter::Pskreporter => Self::PskReporter,
         }
     }
 }
@@ -500,6 +544,14 @@ struct WinlinkTransportArgs {
     transport: WinlinkTransportArg,
     #[arg(long)]
     live: bool,
+    #[arg(long, default_value = DEFAULT_VARA_HOST)]
+    host: String,
+    #[arg(long = "command-port", default_value_t = DEFAULT_VARA_COMMAND_PORT)]
+    command_port: u16,
+    #[arg(long = "data-port", default_value_t = DEFAULT_VARA_DATA_PORT)]
+    data_port: u16,
+    #[arg(long = "timeout-ms", default_value_t = DEFAULT_TELNET_TIMEOUT_MS)]
+    timeout_ms: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -1313,13 +1365,43 @@ fn run_station(args: StationArgs) -> Result<()> {
             Ok(())
         }
         StationCommand::External(args) => {
-            let report = station_external_adapter_report(
-                args.adapter,
-                args.host,
-                args.port,
-                args.enable_tx,
-                args.enable_reporting,
-            );
+            let (_mode, default_host, default_port, protocol, protocol_label, _notes) =
+                station_external_adapter_plan(args.adapter);
+            let host = args.host.clone().unwrap_or_else(|| default_host.to_owned());
+            let port = args.port.unwrap_or(default_port);
+            let report = if args.live || args.fixture.is_some() || args.out.is_some() {
+                let station = resolve_station(args.station.as_deref())?;
+                run_external_adapter(ExternalAdapterRunConfig {
+                    adapter: ExternalAdapterId::from(args.adapter),
+                    station,
+                    host,
+                    port,
+                    protocol_kind: protocol,
+                    protocol_label,
+                    live: args.live,
+                    timeout_ms: args.timeout_ms,
+                    max_events: args.max_events,
+                    enable_tx: args.enable_tx,
+                    enable_reporting: args.enable_reporting,
+                    allow_transmit: args.allow_transmit,
+                    send_to: args.send_to,
+                    message: args.message,
+                    fixture: args.fixture,
+                    out: args.out,
+                    psk_scheme: args.psk_scheme,
+                    psk_path: args.psk_path,
+                    psk_query_call: args.psk_query_call,
+                    psk_lookback_seconds: args.psk_lookback_seconds,
+                })?
+            } else {
+                station_external_adapter_report(
+                    args.adapter,
+                    Some(host),
+                    Some(port),
+                    args.enable_tx,
+                    args.enable_reporting,
+                )
+            };
             println!("{}", serde_json::to_string_pretty(&report)?);
             Ok(())
         }
@@ -1343,6 +1425,7 @@ fn station_external_adapter_for_mode(mode: ModeId) -> Option<StationExternalAdap
         ModeId::Js8callExternal => Some(StationExternalAdapter::Js8call),
         ModeId::WsjtxExternal => Some(StationExternalAdapter::Wsjtx),
         ModeId::FldigiExternal => Some(StationExternalAdapter::Fldigi),
+        ModeId::CwAssist => Some(StationExternalAdapter::CwAssist),
         ModeId::PskReporter => Some(StationExternalAdapter::Pskreporter),
         _ => None,
     }
@@ -1390,6 +1473,17 @@ fn station_external_adapter_plan(
             vec![
                 "intended for RX text, mode state, macro, and guarded TX control",
                 "safe scaffold does not call XML-RPC methods",
+            ],
+        ),
+        StationExternalAdapter::CwAssist => (
+            ModeId::CwAssist,
+            "fixture",
+            0,
+            "fixture-text",
+            "CW receive-only fixture decoder",
+            vec![
+                "decodes plain text or dot/dash Morse fixtures into receive events",
+                "no transmit command is exposed for CW assist",
             ],
         ),
         StationExternalAdapter::Pskreporter => (
@@ -1833,11 +1927,19 @@ fn run_winlink(args: WinlinkArgs) -> Result<()> {
         }
         WinlinkCommand::Transport(args) => {
             let station = resolve_winlink_station(args.station.as_deref())?;
-            let report = transport_plan_report(
-                station,
-                WinlinkTransportKind::from(args.transport),
-                args.live,
-            )?;
+            let transport = WinlinkTransportKind::from(args.transport);
+            let report = if transport == WinlinkTransportKind::Vara {
+                vara_status_check(VaraStatusConfig {
+                    station,
+                    host: args.host,
+                    command_port: args.command_port,
+                    data_port: args.data_port,
+                    timeout_ms: args.timeout_ms,
+                    live: args.live,
+                })?
+            } else {
+                transport_plan_report(station, transport, args.live)?
+            };
             println!("{}", serde_json::to_string_pretty(&report)?);
             Ok(())
         }

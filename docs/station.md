@@ -1,7 +1,9 @@
 # Station Core And Mode Workspaces
 
-`chattybara-station` is the shared station layer for multi-mode work. It does
-not open radios, audio devices, or external apps. It provides:
+`chattybara-station` is the shared station layer for multi-mode work. The
+library itself does not open radios, audio devices, or external apps. The CLI
+adds guarded live adapter commands on top of those station events. The station
+layer provides:
 
 - station profile
 - typed station events and actions
@@ -33,7 +35,7 @@ chattybara station fake-events --mode js8call --station JA1TST --out out/js8/eve
 chattybara station replay out/js8/events.jsonl
 ```
 
-Run the planned protocol scaffold suite:
+Run the protocol suite:
 
 ```sh
 chattybara station protocol-suite --station JA1TST --out-dir out/protocol-suite
@@ -41,12 +43,12 @@ chattybara station protocol-suite --station JA1TST --out-dir out/protocol-suite
 
 This writes replayable fixture sessions for:
 
-- `js8call-external`: TCP JSON-lines API scaffold, default `127.0.0.1:2442`.
-- `wsjtx-external`: WSJT-X/FT8 UDP reporting scaffold, default
+- `js8call-external`: TCP JSON-lines API, default `127.0.0.1:2442`.
+- `wsjtx-external`: WSJT-X/FT8 UDP reporting, default
   `127.0.0.1:2237`.
-- `fldigi-external`: XML-RPC scaffold, default `127.0.0.1:7362`.
-- `cw-assist`: receive-only Morse decode fixture.
-- `pskreporter`: receive-only HTTPS query scaffold.
+- `fldigi-external`: XML-RPC, default `127.0.0.1:7362`.
+- `cw-assist`: receive-only Morse/plain-text fixture decoder.
+- `pskreporter`: receive-only HTTPS query adapter.
 - `winlink-vara`: transport-status scaffold for future external VARA sync.
 - `winlink-orca`: transport-status scaffold for future native orca sync.
 
@@ -58,17 +60,38 @@ chattybara station guard --action send-message --arm-tx
 chattybara station guard --action report-spot --enable-reporting
 ```
 
-Inspect receive-only external adapter scaffolds:
+Inspect adapter defaults:
 
 ```sh
 chattybara station external --adapter js8call
 chattybara station external --adapter wsjtx
 chattybara station external --adapter fldigi
+chattybara station external --adapter cw-assist
 chattybara station external --adapter pskreporter
 ```
 
-These scaffolds do not open network connections yet. They document endpoint
-defaults and keep TX/reporting disabled unless an operator explicitly opts in.
+Run live or fixture adapters:
+
+```sh
+chattybara station external --adapter js8call --live
+chattybara station external --adapter wsjtx --live
+chattybara station external --adapter fldigi --live
+chattybara station external --adapter pskreporter --live
+chattybara station external --adapter cw-assist --fixture cw.txt --out out/cw-events.jsonl
+```
+
+Transmit paths are guarded. JS8Call and fldigi sends require both
+`--enable-tx` and `--allow-transmit`, plus the adapter-specific message fields:
+
+```sh
+chattybara station external \
+  --adapter js8call \
+  --live \
+  --enable-tx \
+  --allow-transmit \
+  --send-to CALL \
+  --message "hello"
+```
 
 ## Workspaces
 

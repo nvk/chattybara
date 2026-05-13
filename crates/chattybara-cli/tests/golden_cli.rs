@@ -3,7 +3,7 @@ use sha2::{Digest, Sha256};
 use std::collections::{HashMap, VecDeque};
 use std::fmt::Write as FmtWrite;
 use std::fs;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
@@ -494,6 +494,44 @@ fn winlink_transport_surfaces_are_guarded() {
 }
 
 #[test]
+fn winlink_vara_live_status_probes_command_port_only() {
+    let host = spawn_fake_vara_command_port();
+    let report = run_json(&[
+        "winlink",
+        "transport",
+        "--station",
+        "ja1tst",
+        "--transport",
+        "vara",
+        "--live",
+        "--host",
+        "127.0.0.1",
+        "--command-port",
+        host.rsplit_once(':').expect("host port").1,
+        "--data-port",
+        "8301",
+        "--timeout-ms",
+        "5000",
+    ]);
+
+    assert_eq!(report["transport"], "vara");
+    assert_eq!(report["dry_run"], false);
+    assert_eq!(report["live"], true);
+    assert_eq!(report["connected"], true);
+    assert_eq!(report["greeting"], "VARA READY");
+    assert!(
+        report["notes"]
+            .as_array()
+            .expect("notes")
+            .iter()
+            .any(|note| note
+                .as_str()
+                .unwrap_or_default()
+                .contains("did not key PTT"))
+    );
+}
+
+#[test]
 fn winlink_telnet_live_sync_lists_fake_cms_inbox() {
     let dir = tempdir().expect("tempdir");
     let store = dir.path().join("winlink-store.json");
@@ -752,7 +790,7 @@ fn station_protocol_suite_covers_external_and_planned_modes() {
     assert_eq!(fldigi["adapter"]["protocol"]["kind"], "xml-rpc-http");
 
     let cw = by_mode("cw-assist");
-    assert!(cw["adapter"].is_null());
+    assert_eq!(cw["adapter"]["protocol"]["kind"], "fixture-text");
     assert_eq!(cw["descriptor"]["capabilities"]["rx_only"], true);
 
     let psk = by_mode("pskreporter");
@@ -830,6 +868,142 @@ fn station_external_scaffolds_are_receive_only_by_default() {
     let js8call = run_json(&["station", "external", "--adapter", "js8call"]);
     assert_eq!(js8call["endpoint"]["port"], 2442);
     assert_eq!(js8call["protocol"]["kind"], "tcp-json-lines");
+}
+
+#[test]
+fn station_external_cw_fixture_decodes_morse() {
+    let dir = tempdir().expect("tempdir");
+    let fixture = dir.path().join("cw.txt");
+    let out = dir.path().join("cw-events.jsonl");
+    fs::write(
+        &fixture,
+        "-.-. --.- / - . ... - / .--- .- .---- --.- ... ---",
+    )
+    .expect("write cw fixture");
+
+    let report = run_json(&[
+        "station",
+        "external",
+        "--adapter",
+        "cw-assist",
+        "--fixture",
+        &path_arg(&fixture),
+        "--out",
+        &path_arg(&out),
+    ]);
+
+    assert_eq!(report["kind"], "station-external-adapter-live-report");
+    assert_eq!(report["mode"], "cw-assist");
+    assert_eq!(report["summary"]["event_counts"]["decode"], 1);
+    assert_eq!(report["records"][1]["event"]["text"], "CQ TEST JA1QSO");
+    assert!(out.exists());
+
+    let replay = run_json(&["station", "replay", &path_arg(&out)]);
+    assert_eq!(replay["summary"]["modes"]["cw-assist"], 2);
+}
+
+#[test]
+fn station_external_wsjtx_fixture_decodes_udp_datagram() {
+    let dir = tempdir().expect("tempdir");
+    let fixture = dir.path().join("wsjtx.datagram");
+    fs::write(&fixture, wsjtx_decode_datagram("CQ JA1QSO PM95")).expect("write wsjtx fixture");
+
+    let report = run_json(&[
+        "station",
+        "external",
+        "--adapter",
+        "wsjtx",
+        "--fixture",
+        &path_arg(&fixture),
+    ]);
+
+    assert_eq!(report["mode"], "wsjtx-external");
+    assert_eq!(report["summary"]["event_counts"]["decode"], 1);
+    assert_eq!(report["records"][1]["event"]["snr_db"], -12);
+    assert_eq!(report["records"][1]["event"]["text"], "FT8: CQ JA1QSO PM95");
+}
+
+#[test]
+fn station_external_js8call_live_reads_and_guarded_sends() {
+    let host = spawn_fake_js8call();
+    let report = run_json(&[
+        "station",
+        "external",
+        "--adapter",
+        "js8call",
+        "--live",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        host.rsplit_once(':').expect("host port").1,
+        "--timeout-ms",
+        "5000",
+        "--max-events",
+        "3",
+        "--enable-tx",
+        "--allow-transmit",
+        "--send-to",
+        "ja1qso",
+        "--message",
+        "hello",
+    ]);
+
+    assert_eq!(report["mode"], "js8call-external");
+    assert_eq!(
+        report["sent_commands"].as_array().expect("commands").len(),
+        2
+    );
+    assert_eq!(report["summary"]["event_counts"]["directed-message"], 1);
+    assert_eq!(report["summary"]["event_counts"]["spot"], 1);
+}
+
+#[test]
+fn station_external_fldigi_live_reads_xmlrpc_rx_text() {
+    let host = spawn_fake_fldigi();
+    let report = run_json(&[
+        "station",
+        "external",
+        "--adapter",
+        "fldigi",
+        "--live",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        host.rsplit_once(':').expect("host port").1,
+        "--timeout-ms",
+        "5000",
+    ]);
+
+    assert_eq!(report["mode"], "fldigi-external");
+    assert_eq!(report["summary"]["event_counts"]["decode"], 1);
+    assert_eq!(report["records"][1]["event"]["text"], "CQ CQ DE JA1QSO");
+}
+
+#[test]
+fn station_external_pskreporter_live_reads_http_spots() {
+    let host = spawn_fake_pskreporter();
+    let report = run_json(&[
+        "station",
+        "external",
+        "--adapter",
+        "pskreporter",
+        "--live",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        host.rsplit_once(':').expect("host port").1,
+        "--psk-scheme",
+        "http",
+        "--psk-query-call",
+        "ja1tst",
+        "--timeout-ms",
+        "5000",
+    ]);
+
+    assert_eq!(report["mode"], "pskreporter");
+    assert_eq!(report["summary"]["event_counts"]["spot"], 1);
+    assert_eq!(report["records"][1]["event"]["call_sign"], "JA1QSO");
+    assert_eq!(report["records"][1]["event"]["frequency_hz"], 14074000);
 }
 
 #[test]
@@ -2295,6 +2469,157 @@ fn corpus_fixture_validation_text_stays_readable() {
 
 fn path_arg(path: &Path) -> String {
     path.to_string_lossy().into_owned()
+}
+
+fn wsjtx_decode_datagram(message: &str) -> Vec<u8> {
+    let mut out = Vec::new();
+    out.extend_from_slice(&0xadbccbda_u32.to_be_bytes());
+    out.extend_from_slice(&3_u32.to_be_bytes());
+    out.extend_from_slice(&2_u32.to_be_bytes());
+    push_wsjtx_utf8(&mut out, "WSJT-X");
+    out.push(1);
+    out.extend_from_slice(&12_345_u32.to_be_bytes());
+    out.extend_from_slice(&(-12_i32).to_be_bytes());
+    out.extend_from_slice(&0.1_f64.to_be_bytes());
+    out.extend_from_slice(&1_500_u32.to_be_bytes());
+    push_wsjtx_utf8(&mut out, "FT8");
+    push_wsjtx_utf8(&mut out, message);
+    out.push(0);
+    out.push(0);
+    out
+}
+
+fn push_wsjtx_utf8(out: &mut Vec<u8>, value: &str) {
+    out.extend_from_slice(&(value.len() as u32).to_be_bytes());
+    out.extend_from_slice(value.as_bytes());
+}
+
+fn spawn_fake_js8call() -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind fake js8call");
+    let address = listener
+        .local_addr()
+        .expect("fake js8call addr")
+        .to_string();
+    thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept fake js8call client");
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .expect("set js8call timeout");
+        let mut reader = BufReader::new(stream.try_clone().expect("clone js8call stream"));
+        let mut status = String::new();
+        reader.read_line(&mut status).expect("read status command");
+        assert!(status.contains("STATION.GET_STATUS"));
+        let mut tx = String::new();
+        reader.read_line(&mut tx).expect("read tx command");
+        assert!(tx.contains("TX.SEND_MESSAGE"));
+        writeln!(
+            stream,
+            r#"{{"type":"RX.DIRECTED","value":"HELLO FROM JS8","params":{{"FROM":"JA1QSO","TO":"JA1TST","SNR":-18}}}}"#
+        )
+        .expect("write js8 directed");
+        writeln!(
+            stream,
+            r#"{{"type":"RX.SPOT","value":"","params":{{"CALL":"JA1QSO","FREQ":14078000,"SNR":-10}}}}"#
+        )
+        .expect("write js8 spot");
+        stream.flush().expect("flush js8call");
+    });
+    address
+}
+
+fn spawn_fake_fldigi() -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind fake fldigi");
+    let address = listener.local_addr().expect("fake fldigi addr").to_string();
+    thread::spawn(move || {
+        for _ in 0..2 {
+            let (mut stream, _) = listener.accept().expect("accept fake fldigi client");
+            let request = read_http_request(&mut stream);
+            let body = if request.contains("<methodName>fldigi.name_version</methodName>") {
+                xmlrpc_string_response("fldigi 4.2 fixture")
+            } else if request.contains("<methodName>rx.get_data</methodName>") {
+                xmlrpc_string_response("CQ CQ DE JA1QSO")
+            } else {
+                xmlrpc_string_response("")
+            };
+            write_http_response(&mut stream, "text/xml", &body);
+        }
+    });
+    address
+}
+
+fn spawn_fake_pskreporter() -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind fake pskreporter");
+    let address = listener
+        .local_addr()
+        .expect("fake pskreporter addr")
+        .to_string();
+    thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept fake pskreporter client");
+        let _request = read_http_request(&mut stream);
+        let body = r#"<receptionReports><receptionReport receiverCallsign="JA1TST" senderCallsign="JA1QSO" frequency="14074000" sNR="-10" /></receptionReports>"#;
+        write_http_response(&mut stream, "application/xml", body);
+    });
+    address
+}
+
+fn spawn_fake_vara_command_port() -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind fake vara command");
+    let address = listener
+        .local_addr()
+        .expect("fake vara command addr")
+        .to_string();
+    thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept fake vara client");
+        stream
+            .write_all(b"VARA READY\r\n")
+            .expect("write vara greeting");
+        stream.flush().expect("flush vara greeting");
+    });
+    address
+}
+
+fn read_http_request(stream: &mut TcpStream) -> String {
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .expect("set http timeout");
+    let mut reader = BufReader::new(stream.try_clone().expect("clone http stream"));
+    let mut headers = String::new();
+    let mut content_length = 0_usize;
+    loop {
+        let mut line = String::new();
+        reader.read_line(&mut line).expect("read http header");
+        if line.is_empty() || line == "\r\n" {
+            break;
+        }
+        if let Some((name, value)) = line.split_once(':')
+            && name.eq_ignore_ascii_case("content-length")
+        {
+            content_length = value.trim().parse().expect("content length");
+        }
+        headers.push_str(&line);
+    }
+    let mut body = vec![0_u8; content_length];
+    if content_length > 0 {
+        reader.read_exact(&mut body).expect("read http body");
+    }
+    format!("{}\r\n{}", headers, String::from_utf8_lossy(&body))
+}
+
+fn write_http_response(stream: &mut TcpStream, content_type: &str, body: &str) {
+    write!(
+        stream,
+        "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    )
+    .expect("write http response");
+    stream.flush().expect("flush http response");
+}
+
+fn xmlrpc_string_response(value: &str) -> String {
+    format!(
+        "<?xml version=\"1.0\"?><methodResponse><params><param><value><string>{}</string></value></param></params></methodResponse>",
+        value
+    )
 }
 
 fn wait_for_ready_file(path: &Path, child: &mut std::process::Child) -> String {

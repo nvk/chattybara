@@ -5,7 +5,7 @@ This checklist is for public source releases.
 ## Scope
 
 - Release type: no-hardware chat-client alpha.
-- Current version: `0.1.0-alpha.11`.
+- Current version: `0.1.0-alpha.12`.
 - Product topology: `chattybara` is the TUI/CLI chat client; `orca-*` crates
   are consumed from `https://gitlab.com/yokij/orca`.
 - Public chattybara home: `https://github.com/nvk/chattybara`.
@@ -37,7 +37,7 @@ CHATTYBARA_SETTINGS=out/release-settings.toml cargo run -p chattybara-cli -- win
 CHATTYBARA_SETTINGS=out/release-settings.toml cargo run -p chattybara-cli -- winlink transport --transport vara
 CHATTYBARA_SETTINGS=out/release-settings.toml cargo run -p chattybara-cli -- winlink transport --transport orca
 cargo build --release -p chattybara-cli --locked
-CARGO_HOME=$PWD/.cargo-home scripts/build-release-asset.sh 0.1.0-alpha.11
+CARGO_HOME=$PWD/.cargo-home scripts/build-release-asset.sh 0.1.0-alpha.12
 ```
 
 `cargo package --workspace` is intentionally not a release gate for this alpha.
@@ -85,7 +85,7 @@ Before tagging:
 ## Tag
 
 ```sh
-git tag -a v0.1.0-alpha.11 -m "chattybara 0.1.0-alpha.11"
+git tag -a v0.1.0-alpha.12 -m "chattybara 0.1.0-alpha.12"
 git push origin master --tags
 ```
 

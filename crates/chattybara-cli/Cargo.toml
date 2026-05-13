@@ -19,9 +19,10 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow.workspace = true
-chattybara-chat = { path = "../chattybara-chat", version = "0.1.0-alpha.11" }
-chattybara-station = { path = "../chattybara-station", version = "0.1.0-alpha.11" }
-chattybara-winlink = { path = "../chattybara-winlink", version = "0.1.0-alpha.11" }
+base64.workspace = true
+chattybara-chat = { path = "../chattybara-chat", version = "0.1.0-alpha.12" }
+chattybara-station = { path = "../chattybara-station", version = "0.1.0-alpha.12" }
+chattybara-winlink = { path = "../chattybara-winlink", version = "0.1.0-alpha.12" }
 orca-audio = { git = "https://gitlab.com/yokij/orca.git", rev = "a58d3451982c6e7ce3fd382ae2ccee370a54c81a", version = "0.1.0-alpha.1" }
 orca-corpus = { git = "https://gitlab.com/yokij/orca.git", rev = "a58d3451982c6e7ce3fd382ae2ccee370a54c81a", version = "0.1.0-alpha.1" }
 orca-dsp = { git = "https://gitlab.com/yokij/orca.git", rev = "a58d3451982c6e7ce3fd382ae2ccee370a54c81a", version = "0.1.0-alpha.1" }
@@ -39,6 +40,7 @@ sha2.workspace = true
 toml.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+ureq.workspace = true
 
 [dev-dependencies]
 retrocompressor.workspace = true

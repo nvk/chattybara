@@ -491,6 +491,26 @@ impl TelnetCmsConfig {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VaraStatusConfig {
+    pub station: String,
+    pub host: String,
+    pub command_port: u16,
+    pub data_port: u16,
+    pub timeout_ms: u64,
+    pub live: bool,
+}
+
+impl VaraStatusConfig {
+    pub fn command_endpoint(&self) -> String {
+        format!("{}:{}", self.host, self.command_port)
+    }
+
+    pub fn data_endpoint(&self) -> String {
+        format!("{}:{}", self.host, self.data_port)
+    }
+}
+
 pub fn telnet_cms_check(config: TelnetCmsConfig) -> WinlinkResult<TransportStatusReport> {
     let station = normalize_call(&config.station)?;
     let endpoint = config.endpoint();
@@ -787,6 +807,84 @@ pub fn telnet_cms_receive_sync(
         outbox_sent,
         queued_remaining: store.messages_in(MailFolder::Outbox).len(),
         notes,
+    })
+}
+
+pub fn vara_status_check(config: VaraStatusConfig) -> WinlinkResult<TransportStatusReport> {
+    let station = normalize_call(&config.station)?;
+    let command_endpoint = config.command_endpoint();
+    let data_endpoint = config.data_endpoint();
+    let endpoint = format!("{command_endpoint}/{data_endpoint}");
+    if !config.live {
+        return Ok(TransportStatusReport {
+            kind: "winlink-transport-status",
+            ok: true,
+            station,
+            transport: WinlinkTransportKind::Vara,
+            dry_run: true,
+            live: false,
+            endpoint: Some(endpoint),
+            connected: false,
+            greeting: None,
+            notes: vec![
+                "VARA is modeled as an external operator-installed modem adapter".to_owned(),
+                "dry run only; pass --live to probe the VARA command port".to_owned(),
+                "mailbox sync over VARA remains disabled until session control is implemented"
+                    .to_owned(),
+            ],
+        });
+    }
+
+    let address = command_endpoint
+        .to_socket_addrs()?
+        .next()
+        .ok_or_else(|| std::io::Error::other(format!("could not resolve {command_endpoint}")))?;
+    let timeout = Duration::from_millis(config.timeout_ms);
+    let mut stream = TcpStream::connect_timeout(&address, timeout)?;
+    stream.set_read_timeout(Some(timeout))?;
+    stream.set_write_timeout(Some(timeout))?;
+    let mut greeting = Vec::new();
+    let mut byte = [0_u8; 1];
+    while greeting.len() < 256 {
+        match stream.read(&mut byte) {
+            Ok(0) => break,
+            Ok(_) => {
+                greeting.push(byte[0]);
+                if matches!(byte[0], b'\r' | b'\n') {
+                    break;
+                }
+            }
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) =>
+            {
+                break;
+            }
+            Err(error) => return Err(error.into()),
+        }
+    }
+    let greeting = (!greeting.is_empty())
+        .then(|| String::from_utf8_lossy(&greeting).trim().to_owned())
+        .filter(|value| !value.is_empty());
+    Ok(TransportStatusReport {
+        kind: "winlink-transport-status",
+        ok: true,
+        station,
+        transport: WinlinkTransportKind::Vara,
+        dry_run: false,
+        live: true,
+        endpoint: Some(endpoint),
+        connected: true,
+        greeting,
+        notes: vec![
+            "VARA command port is reachable".to_owned(),
+            "chattybara did not key PTT, open the data session, authenticate, or sync mail"
+                .to_owned(),
+            "mailbox sync over VARA remains disabled until session control is implemented"
+                .to_owned(),
+        ],
     })
 }
 
