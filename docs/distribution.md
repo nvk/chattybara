@@ -11,7 +11,7 @@ tap can be added after the new public repositories are created and tagged.
 ## Source Install
 
 ```sh
-cargo install --git https://github.com/nvk/chattybara.git --tag v0.1.0-alpha.1 --locked --package chattybara-cli --bin chattybara
+cargo install --git https://github.com/nvk/chattybara.git --tag v0.1.0-alpha.2 --locked --package chattybara-cli --bin chattybara
 ```
 
 During local development:
@@ -25,13 +25,13 @@ chattybara chat tui
 ## Build Binary Archives
 
 ```sh
-CARGO_HOME=$PWD/.cargo-home scripts/build-release-asset.sh 0.1.0-alpha.1
+CARGO_HOME=$PWD/.cargo-home scripts/build-release-asset.sh 0.1.0-alpha.2
 ```
 
 The script writes:
 
-- `dist/chattybara-0.1.0-alpha.1-aarch64-apple-darwin.tar.gz`
-- `dist/chattybara-0.1.0-alpha.1-aarch64-apple-darwin.tar.gz.sha256`
+- `dist/chattybara-0.1.0-alpha.2-aarch64-apple-darwin.tar.gz`
+- `dist/chattybara-0.1.0-alpha.2-aarch64-apple-darwin.tar.gz.sha256`
 
 Build orca release assets from `https://gitlab.com/yokij/orca`, not from
 this chat client repo.

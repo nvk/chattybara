@@ -1520,6 +1520,11 @@ impl ChatTuiApp {
     fn status_text(&self) -> String {
         let transcript = self.transcript();
         let app_state = self.app_state();
+        let station_call = if self.setup.is_some() {
+            self.station_call.as_str()
+        } else {
+            transcript.station.call_sign.as_str()
+        };
         let setup_label = if let Some(setup) = &self.setup {
             format!(" | setup {}", setup.backend.label())
         } else {
@@ -1527,7 +1532,7 @@ impl ChatTuiApp {
         };
         format!(
             "{} | backend {}{} | {} | peer {} | {} | radio {} | focus {} | mode {} | msg {} | b:{} cq:{} m:{} f:{}",
-            transcript.station.call_sign,
+            station_call,
             self.backend_label,
             setup_label,
             state_label(transcript.state),
@@ -2696,7 +2701,7 @@ mod tests {
 
     #[test]
     fn tui_draws_guided_setup_surface() {
-        let app = ChatTuiApp::new(ChatTuiConfig {
+        let mut app = ChatTuiApp::new(ChatTuiConfig {
             station_call: "JA1TST".to_owned(),
             backend: ChatTuiBackend::NativeLoopback,
             local_node: None,
@@ -2725,6 +2730,22 @@ mod tests {
         assert!(rendered.contains("backend native-loopback"));
         assert!(rendered.contains("safety DRY RUN"));
         assert!(rendered.contains("focus setup/radio"));
+
+        app.apply_line("/station ve3tst").expect("station");
+        assert!(app.status_text().starts_with("VE3TST |"));
+
+        let backend = ratatui::backend::TestBackend::new(120, 32);
+        let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
+        terminal.draw(|frame| draw(frame, &app)).expect("draw");
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(rendered.contains("VE3TST | backend"));
+        assert!(rendered.contains("station VE3TST"));
     }
 
     #[test]

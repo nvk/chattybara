@@ -2,6 +2,11 @@
 
 All notable public release changes are tracked here.
 
+## 0.1.0-alpha.2 - 2026-05-12
+
+- Fixed the TUI top status bar so `/station CALL` immediately shows the pending
+  setup station before `/start`.
+
 ## 0.1.0-alpha.1 - 2026-05-12
 
 Initial public research preview.
