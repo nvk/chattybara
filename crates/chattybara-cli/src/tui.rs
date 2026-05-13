@@ -1844,12 +1844,19 @@ fn draw(frame: &mut ratatui::Frame<'_>, app: &ChatTuiApp) {
     .wrap(Wrap { trim: true });
     frame.render_widget(help, layout[3]);
 
-    let cursor_x = layout[2]
-        .x
-        .saturating_add(app.input.len() as u16)
-        .saturating_add(1)
-        .min(layout[2].right().saturating_sub(1));
-    frame.set_cursor_position((cursor_x, layout[2].y + 1));
+    if layout[2].width > 1 && layout[2].height > 1 {
+        let input_width = app.input.len().min(u16::MAX as usize) as u16;
+        let cursor_x = layout[2]
+            .x
+            .saturating_add(input_width)
+            .saturating_add(1)
+            .min(layout[2].right().saturating_sub(1));
+        let cursor_y = layout[2]
+            .y
+            .saturating_add(1)
+            .min(layout[2].bottom().saturating_sub(1));
+        frame.set_cursor_position((cursor_x, cursor_y));
+    }
 }
 
 fn pane_block<'a>(title: &'a str, pane: TuiPane, focus: TuiPane) -> Block<'a> {
@@ -1901,7 +1908,11 @@ fn setup_status_items(app: &ChatTuiApp, height: u16) -> Vec<ListItem<'static>> {
         ));
         rows.push((
             app.setup_selected == 1,
-            format!("{} backend {}", checklist(true), setup.backend.label()),
+            format!(
+                "{} backend {}",
+                checklist(true),
+                setup_backend_pane_label(setup.backend)
+            ),
         ));
         if setup.backend == ChatTuiBackend::NativeLocalNode {
             rows.push((
@@ -1915,7 +1926,7 @@ fn setup_status_items(app: &ChatTuiApp, height: u16) -> Vec<ListItem<'static>> {
             rows.push((
                 app.setup_selected == 3,
                 format!(
-                    "{} local node {}",
+                    "{} node {}",
                     checklist(setup.mode.is_some()),
                     setup_mode_label(setup.mode.as_ref())
                 ),
@@ -1927,7 +1938,7 @@ fn setup_status_items(app: &ChatTuiApp, height: u16) -> Vec<ListItem<'static>> {
             ));
             rows.push((
                 app.setup_selected == 3,
-                format!("{} local node not required", checklist(true)),
+                format!("{} node not required", checklist(true)),
             ));
         }
         rows.push((
@@ -1954,7 +1965,7 @@ fn setup_status_items(app: &ChatTuiApp, height: u16) -> Vec<ListItem<'static>> {
                 setup
                     .hamlib_host
                     .as_deref()
-                    .map(|host| format!("hamlib {host}"))
+                    .map(|host| format!("rig {host}"))
                     .unwrap_or_else(|| "off".to_owned())
             ),
         ));
@@ -1985,6 +1996,15 @@ fn checklist(done: bool) -> &'static str {
 
 fn setup_row_count(app: &ChatTuiApp) -> usize {
     if app.setup.is_some() { 8 } else { 1 }
+}
+
+fn setup_backend_pane_label(backend: ChatTuiBackend) -> &'static str {
+    match backend {
+        ChatTuiBackend::Fake => "fake",
+        ChatTuiBackend::NativeLocalNode => "local-node",
+        ChatTuiBackend::NativeLoopback => "loopback",
+        ChatTuiBackend::NativeWavLoopback => "wav-loopback",
+    }
 }
 
 fn next_setup_backend(backend: ChatTuiBackend) -> ChatTuiBackend {
@@ -2107,13 +2127,24 @@ fn top_styled_items(
     height: u16,
     empty: &str,
 ) -> Vec<ListItem<'static>> {
-    let visible_rows = height.saturating_sub(2) as usize;
+    let visible_rows = height.saturating_sub(2).max(1) as usize;
     if lines.is_empty() {
         return vec![ListItem::new(empty.to_owned())];
     }
+    let selected_index = lines
+        .iter()
+        .position(|(selected, _)| *selected)
+        .unwrap_or(0);
+    let start = if selected_index >= visible_rows {
+        selected_index + 1 - visible_rows
+    } else {
+        0
+    }
+    .min(lines.len().saturating_sub(visible_rows));
     lines
         .into_iter()
-        .take(visible_rows.max(1))
+        .skip(start)
+        .take(visible_rows)
         .map(|(selected, line)| {
             if selected {
                 ListItem::new(format!("> {line}")).style(
@@ -2510,6 +2541,82 @@ mod tests {
     use std::time::{Duration, Instant};
     use tempfile::tempdir;
 
+    const TEST_SHA256: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+
+    fn render_app_lines(app: &ChatTuiApp, width: u16, height: u16) -> Vec<String> {
+        let backend = ratatui::backend::TestBackend::new(width, height);
+        let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
+        terminal.draw(|frame| draw(frame, app)).expect("draw");
+        terminal
+            .backend()
+            .buffer()
+            .content
+            .chunks(width as usize)
+            .map(|row| row.iter().map(|cell| cell.symbol()).collect::<String>())
+            .collect()
+    }
+
+    fn render_app_text(app: &ChatTuiApp, width: u16, height: u16) -> String {
+        render_app_lines(app, width, height).join("\n")
+    }
+
+    fn visual_app() -> ChatTuiApp {
+        let mut app = ChatTuiApp::new(ChatTuiConfig {
+            station_call: "ja1tst".to_owned(),
+            backend: ChatTuiBackend::Fake,
+            local_node: None,
+            setup: None,
+        })
+        .expect("app");
+        app.apply_line("/connect ja1qso").expect("connect");
+        for index in 0..14 {
+            app.apply_line(&format!(
+                "visual layout transcript message {index:02} with enough words to exercise clipping and wrapping"
+            ))
+            .expect("send");
+        }
+        app.apply_line("/rx ja1qso inbound visual check with a moderately long payload")
+            .expect("receive");
+        app.apply_line("/beacon monitoring 14.105 USB visual matrix")
+            .expect("beacon");
+        app.apply_line("/cq testing visual pane layout")
+            .expect("cq");
+        app.apply_line("/mail ja1qso Visual Subject | Visual mailbox body")
+            .expect("mail");
+        app.apply_line(&format!(
+            "/file-offer ja1qso visual-layout-fixture-with-a-long-name.txt 42 {TEST_SHA256} visual note"
+        ))
+        .expect("file offer");
+        app
+    }
+
+    fn setup_visual_app() -> ChatTuiApp {
+        let mut app = ChatTuiApp::new(ChatTuiConfig {
+            station_call: "ja1tst".to_owned(),
+            backend: ChatTuiBackend::NativeLoopback,
+            local_node: None,
+            setup: Some(ChatTuiSetupConfig {
+                backend: ChatTuiBackend::NativeLoopback,
+                peer_call: None,
+                mode: None,
+                channel: ChannelConfig::default(),
+            }),
+        })
+        .expect("app");
+        app.apply_line("/station ve3tst").expect("station");
+        app.apply_line("/backend native-local-node")
+            .expect("backend");
+        app.apply_line("/peer ja1qso").expect("peer");
+        app.apply_line("/listen 127.0.0.1:0").expect("listen");
+        app.apply_line("/audio-input USB Audio CODEC Extremely Long Input Device Name")
+            .expect("audio input");
+        app.apply_line("/audio-output USB Audio CODEC Extremely Long Output Device Name")
+            .expect("audio output");
+        app.apply_line("/radio-hamlib 127.0.0.1:4532")
+            .expect("radio");
+        app
+    }
+
     #[test]
     fn parses_tui_commands() {
         assert_eq!(
@@ -2882,6 +2989,154 @@ mod tests {
         assert!(rendered.contains("beacon / cq monitor"));
         assert!(rendered.contains("mailbox"));
         assert!(rendered.contains("file offers"));
+        assert!(rendered.contains("focus composer"));
+        assert!(rendered.contains("input [chat]"));
+    }
+
+    #[test]
+    fn tui_visual_layout_matrix_renders_core_surfaces() {
+        let mut app = visual_app();
+        let sizes = [
+            (40, 12),
+            (60, 16),
+            (80, 24),
+            (99, 24),
+            (100, 24),
+            (120, 32),
+            (160, 48),
+        ];
+        let panes = [
+            TuiPane::Setup,
+            TuiPane::Transcript,
+            TuiPane::Monitor,
+            TuiPane::Mailbox,
+            TuiPane::FileOffers,
+            TuiPane::Composer,
+        ];
+
+        for pane in panes {
+            app.focus = pane;
+            for (width, height) in sizes {
+                let lines = render_app_lines(&app, width, height);
+                let rendered = lines.join("\n");
+                assert_eq!(lines.len(), height as usize, "{width}x{height}");
+                assert!(
+                    lines.first().is_some_and(|line| line.contains("JA1TST")),
+                    "missing station in status at {width}x{height} focus {}:\n{rendered}",
+                    pane.label()
+                );
+                assert!(
+                    rendered.contains("transcript"),
+                    "missing transcript pane at {width}x{height} focus {}:\n{rendered}",
+                    pane.label()
+                );
+                assert!(
+                    rendered.contains("input [chat]"),
+                    "missing input pane at {width}x{height} focus {}:\n{rendered}",
+                    pane.label()
+                );
+
+                if width >= 100 && height >= 24 {
+                    for label in [
+                        "setup / radio",
+                        "beacon / cq monitor",
+                        "mailbox",
+                        "file offers",
+                    ] {
+                        assert!(
+                            rendered.contains(label),
+                            "missing {label} at {width}x{height} focus {}:\n{rendered}",
+                            pane.label()
+                        );
+                    }
+                    assert!(
+                        rendered.contains(&format!("focus {}", pane.label())),
+                        "status did not track focus {} at {width}x{height}:\n{rendered}",
+                        pane.label()
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn tui_visual_setup_commands_update_pending_status_and_rows() {
+        let mut app = setup_visual_app();
+
+        for (width, height) in [(80, 24), (120, 32), (160, 48)] {
+            app.setup_selected = 0;
+            let rendered = render_app_text(&app, width, height);
+            let first_row = rendered.lines().next().unwrap_or_default();
+            assert!(
+                first_row.contains("VE3TST"),
+                "status did not show pending setup station at {width}x{height}:\n{rendered}"
+            );
+            assert!(
+                first_row.contains("setup native-local-node"),
+                "status did not show pending setup backend at {width}x{height}:\n{rendered}"
+            );
+            for label in [
+                "station VE3TST",
+                "backend local-node",
+                "peer JA1QSO",
+                "node listen 127.0.0.1:0",
+            ] {
+                assert!(
+                    rendered.contains(label),
+                    "missing setup row {label} at {width}x{height}:\n{rendered}"
+                );
+            }
+
+            app.setup_selected = 6;
+            let rendered = render_app_text(&app, width, height);
+            assert!(
+                rendered.contains("radio rig 127.0.0.1:4532"),
+                "selected radio row was not visible at {width}x{height}:\n{rendered}"
+            );
+
+            app.setup_selected = 7;
+            let rendered = render_app_text(&app, width, height);
+            assert!(
+                rendered.contains("start | safety DRY RUN"),
+                "selected start row was not visible at {width}x{height}:\n{rendered}"
+            );
+        }
+    }
+
+    #[test]
+    fn tui_visual_tiny_terminals_do_not_panic() {
+        let mut app = visual_app();
+        app.input = "x".repeat(70_000);
+
+        for width in [16, 20, 30, 40] {
+            for height in [4, 5, 6, 7, 8, 10, 12] {
+                let lines = render_app_lines(&app, width, height);
+                assert_eq!(lines.len(), height as usize, "{width}x{height}");
+                assert!(
+                    lines.iter().any(|line| !line.trim().is_empty()),
+                    "blank render at {width}x{height}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn tui_visual_keyboard_and_workspace_state_are_visible() {
+        let mut app = visual_app();
+        app.apply_line("/workspace weak-signal").expect("workspace");
+        app.handle_key(KeyCode::Char('/'), KeyModifiers::empty())
+            .expect("slash");
+        app.handle_key(KeyCode::Char('h'), KeyModifiers::empty())
+            .expect("h");
+
+        let rendered = render_app_text(&app, 120, 32);
+        assert!(rendered.contains("workspace weak-signal"));
+        assert!(rendered.contains("input [command]"));
+        assert!(rendered.contains("/h"));
+
+        app.handle_key(KeyCode::Esc, KeyModifiers::empty())
+            .expect("escape");
+        let rendered = render_app_text(&app, 120, 32);
         assert!(rendered.contains("focus composer"));
         assert!(rendered.contains("input [chat]"));
     }

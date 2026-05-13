@@ -275,6 +275,19 @@ fn chat_tui_setup_preview_works_without_required_flags() {
             .iter()
             .any(|value| value == "/station CALL")
     );
+
+    let preview = run_json(&[
+        "chat",
+        "tui",
+        "--setup-preview",
+        "--station",
+        "ve3tst",
+        "--peer",
+        "ja1qso",
+    ]);
+
+    assert_eq!(preview["station"], "VE3TST");
+    assert_eq!(preview["peer"], "JA1QSO");
 }
 
 #[test]

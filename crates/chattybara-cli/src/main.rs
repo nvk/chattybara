@@ -1504,6 +1504,10 @@ fn chat_tui_setup_preview(
     backend: ChatTuiBackend,
     setup: Option<&ChatTuiSetupConfig>,
 ) -> Value {
+    let station = normalize_preview_call(station);
+    let peer = setup
+        .and_then(|value| value.peer_call.as_deref())
+        .map(normalize_preview_call);
     let selected_backend = setup.map(|value| value.backend).unwrap_or(backend);
     let local_node = setup.and_then(|value| {
         value.mode.as_ref().map(|mode| match mode {
@@ -1531,7 +1535,7 @@ fn chat_tui_setup_preview(
             backend.label()
         },
         "selected_backend": selected_backend.label(),
-        "peer": setup.and_then(|value| value.peer_call.as_deref()),
+        "peer": peer,
         "local_node": local_node,
         "channel": setup.map(|value| value.channel),
         "audio": {
@@ -1557,6 +1561,10 @@ fn chat_tui_setup_preview(
             "/start",
         ],
     })
+}
+
+fn normalize_preview_call(value: &str) -> String {
+    value.trim().to_ascii_uppercase()
 }
 
 fn build_tui_local_node_config(
