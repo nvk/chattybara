@@ -1490,7 +1490,7 @@ fn run_winlink(args: WinlinkArgs) -> Result<()> {
     match args.command {
         WinlinkCommand::Account(args) => match args.command {
             WinlinkAccountCommand::Setup(args) => {
-                let station = resolve_station(args.station.as_deref())?;
+                let station = resolve_winlink_station(args.station.as_deref())?;
                 let store_path = resolve_winlink_store_path(args.store, &station)?;
                 let mut store = WinlinkStore::load_or_new(&store_path, &station)
                     .with_context(|| format!("loading {}", store_path.display()))?;
@@ -1514,7 +1514,7 @@ fn run_winlink(args: WinlinkArgs) -> Result<()> {
             }
             WinlinkAccountCommand::Password(args) => run_winlink_account_password(args),
             WinlinkAccountCommand::Status(args) => {
-                let station = resolve_station(args.station.as_deref())?;
+                let station = resolve_winlink_station(args.station.as_deref())?;
                 let store_path = resolve_winlink_store_path(args.store, &station)?;
                 let store = WinlinkStore::load_or_new(&store_path, &station)
                     .with_context(|| format!("loading {}", store_path.display()))?;
@@ -1536,7 +1536,7 @@ fn run_winlink(args: WinlinkArgs) -> Result<()> {
             }
         },
         WinlinkCommand::Compose(args) => {
-            let station = resolve_station(args.station.as_deref())?;
+            let station = resolve_winlink_station(args.station.as_deref())?;
             let store_path = resolve_winlink_store_path(args.store, &station)?;
             let mut store = WinlinkStore::load_or_new(&store_path, &station)
                 .with_context(|| format!("loading {}", store_path.display()))?;
@@ -1568,7 +1568,7 @@ fn run_winlink(args: WinlinkArgs) -> Result<()> {
         WinlinkCommand::Inbox(args) => run_winlink_mailbox(args, MailFolder::Inbox),
         WinlinkCommand::Outbox(args) => run_winlink_mailbox(args, MailFolder::Outbox),
         WinlinkCommand::Read(args) => {
-            let station = resolve_station(args.station.as_deref())?;
+            let station = resolve_winlink_station(args.station.as_deref())?;
             let store_path = resolve_winlink_store_path(args.store, &station)?;
             let store = WinlinkStore::load_or_new(&store_path, &station)
                 .with_context(|| format!("loading {}", store_path.display()))?;
@@ -1587,7 +1587,7 @@ fn run_winlink(args: WinlinkArgs) -> Result<()> {
             Ok(())
         }
         WinlinkCommand::Sync(args) => {
-            let station = resolve_station(args.station.as_deref())?;
+            let station = resolve_winlink_station(args.station.as_deref())?;
             let store_path = resolve_winlink_store_path(args.store, &station)?;
             let mut store = WinlinkStore::load_or_new(&store_path, &station)
                 .with_context(|| format!("loading {}", store_path.display()))?;
@@ -1630,7 +1630,7 @@ fn run_winlink(args: WinlinkArgs) -> Result<()> {
             Ok(())
         }
         WinlinkCommand::Telnet(args) => {
-            let station = resolve_station(args.station.as_deref())?;
+            let station = resolve_winlink_station(args.station.as_deref())?;
             let report = telnet_cms_check(TelnetCmsConfig {
                 station,
                 host: args.host,
@@ -1648,7 +1648,7 @@ fn run_winlink(args: WinlinkArgs) -> Result<()> {
             Ok(())
         }
         WinlinkCommand::Transport(args) => {
-            let station = resolve_station(args.station.as_deref())?;
+            let station = resolve_winlink_station(args.station.as_deref())?;
             let report = transport_plan_report(
                 station,
                 WinlinkTransportKind::from(args.transport),
@@ -1663,7 +1663,7 @@ fn run_winlink(args: WinlinkArgs) -> Result<()> {
 fn run_winlink_account_password(args: WinlinkPasswordArgs) -> Result<()> {
     match args.command {
         WinlinkPasswordCommand::Set(args) => {
-            let station = resolve_station(args.station.as_deref())?;
+            let station = resolve_winlink_station(args.station.as_deref())?;
             let store_path = resolve_winlink_store_path(args.store, &station)?;
             let password = read_winlink_password(args.password_stdin)?;
             save_winlink_password_to_keychain(&station, &password)?;
@@ -1690,7 +1690,7 @@ fn run_winlink_account_password(args: WinlinkPasswordArgs) -> Result<()> {
             Ok(())
         }
         WinlinkPasswordCommand::Delete(args) => {
-            let station = resolve_station(args.station.as_deref())?;
+            let station = resolve_winlink_station(args.station.as_deref())?;
             let store_path = resolve_winlink_store_path(args.store, &station)?;
             let deleted = delete_winlink_password_from_keychain(&station)?;
             let mut store = WinlinkStore::load_or_new(&store_path, &station)
@@ -1717,7 +1717,7 @@ fn run_winlink_account_password(args: WinlinkPasswordArgs) -> Result<()> {
             Ok(())
         }
         WinlinkPasswordCommand::Status(args) => {
-            let station = resolve_station(args.station.as_deref())?;
+            let station = resolve_winlink_station(args.station.as_deref())?;
             let store_path = resolve_winlink_store_path(args.store, &station)?;
             let store = WinlinkStore::load_or_new(&store_path, &station)
                 .with_context(|| format!("loading {}", store_path.display()))?;
@@ -1764,7 +1764,7 @@ fn read_winlink_password(password_stdin: bool) -> Result<String> {
 }
 
 fn run_winlink_mailbox(args: WinlinkMailboxArgs, folder: MailFolder) -> Result<()> {
-    let station = resolve_station(args.station.as_deref())?;
+    let station = resolve_winlink_station(args.station.as_deref())?;
     let store_path = resolve_winlink_store_path(args.store, &station)?;
     let store = WinlinkStore::load_or_new(&store_path, &station)
         .with_context(|| format!("loading {}", store_path.display()))?;
@@ -1801,6 +1801,68 @@ fn run_winlink_mailbox(args: WinlinkMailboxArgs, folder: MailFolder) -> Result<(
 fn resolve_winlink_store_path(path: Option<PathBuf>, station: &str) -> Result<PathBuf> {
     path.map(Ok)
         .unwrap_or_else(|| Ok(default_store_path(station)?))
+}
+
+fn resolve_winlink_station(explicit: Option<&str>) -> Result<String> {
+    if let Some(station) = explicit.filter(|value| !value.trim().is_empty()) {
+        return Ok(normalize_call(station)?);
+    }
+    if let Some(station) = load_local_settings()?.station {
+        let station = normalize_call(&station)?;
+        if std::env::var_os(LOCAL_SETTINGS_ENV).is_some() || station != DEFAULT_SAMPLE_STATION {
+            return Ok(station);
+        }
+    }
+    if let Some(station) = discover_configured_winlink_station()? {
+        return Ok(station);
+    }
+    resolve_station(None)
+}
+
+fn discover_configured_winlink_station() -> Result<Option<String>> {
+    let Some(root) = default_store_path(DEFAULT_SAMPLE_STATION)
+        .ok()
+        .and_then(|path| path.parent().and_then(Path::parent).map(Path::to_path_buf))
+    else {
+        return Ok(None);
+    };
+
+    let entries = match fs::read_dir(&root) {
+        Ok(entries) => entries,
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::NotFound | std::io::ErrorKind::PermissionDenied
+            ) =>
+        {
+            return Ok(None);
+        }
+        Err(error) => return Err(error).with_context(|| format!("reading {}", root.display())),
+    };
+
+    let mut candidates = Vec::new();
+    for entry in entries {
+        let Ok(entry) = entry else {
+            continue;
+        };
+        let path = entry.path().join("store.json");
+        if !fs::metadata(&path)
+            .map(|metadata| metadata.is_file())
+            .unwrap_or(false)
+        {
+            continue;
+        }
+        let station_hint = entry.file_name().to_string_lossy().into_owned();
+        let Ok(store) = WinlinkStore::load_or_new(&path, &station_hint) else {
+            continue;
+        };
+        if let Some(account) = store.account {
+            candidates.push(account.station);
+        }
+    }
+    candidates.sort();
+    candidates.dedup();
+    Ok((candidates.len() == 1).then(|| candidates.remove(0)))
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]

@@ -2,6 +2,14 @@
 
 All notable public release changes are tracked here.
 
+## 0.1.0-alpha.10 - 2026-05-13
+
+- Fixed Winlink station resolution so `chattybara winlink ...` commands without
+  `--station` auto-select the single configured Winlink account store before
+  falling back to the generic local station setting.
+- Prevented live Winlink sync from silently using the sample station store when
+  a real Keychain-backed Winlink account has already been configured.
+
 ## 0.1.0-alpha.9 - 2026-05-13
 
 - Fixed the live Telnet/CMS B2F handshake to send `;FW:` with the required
