@@ -62,6 +62,8 @@ Internally, chat is now the first workspace. The planned workspace set is:
 - `cw-assist`: Morse copy, speed/confidence, keyer/macro controls.
 - `spots`: PSK Reporter queue/query/report state.
 - `operator-console`: fldigi-style RX/TX text and macros.
+- `winlink`: mailbox, outbox, attachments, sync status, and transport
+  selection for Telnet/CMS, external VARA, and experimental orca links.
 - `rig-setup`: audio, Hamlib, IC-705, HAM Radio Apps, dry-run/live/PTT safety.
 
 The current TUI accepts:
@@ -76,7 +78,8 @@ The current TUI accepts:
 ```
 
 The workspace command is scaffolded so the UI can evolve without changing the
-user entry point.
+user entry point. `/workspace winlink` is planned with the Winlink mailbox
+adapter work.
 
 ## Safety
 

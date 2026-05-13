@@ -56,6 +56,9 @@ same station contract:
 - `native-local-node`: two-process localhost packet-audio link.
 - external-app scaffolds: JS8Call JSON, WSJT-X UDP, fldigi XML-RPC, and PSK
   Reporter query/reporting surfaces.
+- Winlink mailbox adapters: Telnet/CMS for no-radio Internet sync first, then
+  external VARA modem sessions and experimental orca sessions behind the same
+  mailbox/store-forward workflow.
 - future adapters: KISS-style packet transports, documented modem APIs,
   receive-only decoders, and other protocol stacks.
 
@@ -69,6 +72,11 @@ The station core is intentionally broader than chat. FT8/WSJT-X belongs in a
 weak-signal decode/exchange workspace, Morse/CW in an assist workspace, PSK
 Reporter in a spot monitor, and fldigi in an operator console. The existing chat
 surface remains the default workspace.
+
+Winlink belongs in a mailbox workspace rather than the free-text chat surface.
+The mailbox model should be transport-neutral: Internet Telnet/CMS, external
+VARA, and orca-backed experimental links should share the same message store,
+outbox, attachment handling, receipts, and safety indicators.
 
 ## Release Principle
 

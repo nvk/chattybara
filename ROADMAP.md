@@ -36,6 +36,16 @@ backend work.
 - Promote receive-only external adapter scaffolds into fixture-backed adapters
   for JS8Call, WSJT-X, fldigi, and PSK Reporter before adding any TX/reporting
   paths.
+- Add Winlink as a mailbox/workflow backend, starting with Internet
+  Telnet/CMS for live no-radio testing.
+- Keep the Winlink mail model transport-neutral so the same inbox, outbox,
+  drafts, attachments, receipts, and sync status can run over multiple links.
+- Add Winlink-over-VARA as an external modem adapter after Telnet/CMS is
+  stable. Treat VARA as an operator-installed external modem/backend, guarded
+  by explicit live/TX opt-ins and fixture-backed tests.
+- Add Winlink-over-orca as the experimental open modem path. Orca should own
+  the packet/audio/link mechanics; chattybara should own the Winlink mailbox,
+  session UI, safety gates, and operator workflow.
 - Add backend adapters for documented modem/protocol stacks where possible.
 - Keep protocol-specific compatibility claims out of chattybara unless they are
   backed by backend-specific documentation and tests.
